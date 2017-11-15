@@ -105,8 +105,14 @@ class ALI(BaseModel):
 
         z_fake = np.random.normal(size=(batchsize, self.z_dims)).astype('float32')
 
-        g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_fake], y_pos)
-        d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_fake], y_pos)
+        i = 0
+        while True:
+            g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_fake], y_pos)
+            i += 1
+            if g_loss < 5 or i > 20:
+                break
+
+        d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_fake], y_neg)
 
         losses = {
             'g_loss': g_loss,

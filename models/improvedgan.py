@@ -116,7 +116,13 @@ class ImprovedGAN(BaseModel):
         z_sample = np.random.uniform(-1.0, 1.0, size=(batchsize, self.z_dims))
         z_sample = z_sample.astype('float32')
 
-        g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_sample], dummy)
+        i = 0
+        while True:
+            g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_sample], dummy)
+            i += 1
+            if g_loss < 5 or i > 20:
+                break
+
         d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_sample], dummy)
 
         loss = {
@@ -178,7 +184,7 @@ class ImprovedGAN(BaseModel):
         x = BasicConvLayer(filters=64, strides=(2, 2))(inputs)
         x = BasicConvLayer(filters=128, strides=(2, 2))(x)
         x = BasicConvLayer(filters=256, strides=(2, 2))(x)
-        #x = BasicConvLayer(filters=512, strides=(2, 2))(x)
+        # x = BasicConvLayer(filters=512, strides=(2, 2))(x)
 
         x = Flatten()(x)
         x = Dense(1024)(x)
