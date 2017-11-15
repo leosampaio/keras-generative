@@ -15,6 +15,7 @@ from .base import BaseModel
 from .utils import *
 from .layers import *
 
+
 class DiscriminatorLossLayer(Layer):
     def __init__(self, **kwargs):
         self.is_placeholder = True
@@ -36,6 +37,7 @@ class DiscriminatorLossLayer(Layer):
         self.add_loss(loss, inputs=inputs)
 
         return y_real
+
 
 class GeneratorLossLayer(Layer):
     def __init__(self, **kwargs):
@@ -59,12 +61,14 @@ class GeneratorLossLayer(Layer):
 
         return y_real
 
+
 def discriminator_accuracy(y_real, y_fake):
     y_pos = K.ones_like(y_real)
     y_neg = K.zeros_like(y_fake)
     acc_real = keras.metrics.binary_accuracy(y_pos, y_real)
     acc_fake = keras.metrics.binary_accuracy(y_neg, y_fake)
     return 0.5 * K.mean(acc_real + acc_fake)
+
 
 def generator_accuracy(y_real, y_fake):
     y_pos = K.ones_like(y_fake)
@@ -73,13 +77,14 @@ def generator_accuracy(y_real, y_fake):
     acc_real = keras.metrics.binary_accuracy(y_neg, y_real)
     return 0.5 * K.mean(acc_real + acc_fake)
 
+
 class ALI(BaseModel):
     def __init__(self,
-        input_shape=(64, 64, 3),
-        z_dims = 128,
-        name='ali',
-        **kwargs
-    ):
+                 input_shape=(64, 64, 3),
+                 z_dims=128,
+                 name='ali',
+                 **kwargs
+                 ):
         super(ALI, self).__init__(input_shape=input_shape, name=name, **kwargs)
 
         self.z_dims = z_dims
@@ -210,11 +215,6 @@ class ALI(BaseModel):
         z = BasicConvLayer(filters=1024, kernel_size=(1, 1), dropout=0.2)(z)
         z = BasicConvLayer(filters=1024, kernel_size=(1, 1), dropout=0.2)(z)
         z = Flatten()(z)
-
-        xz = Concatenate(axis=-1)([x, z])
-        xz = Dropout(0.2)(xz)
-        xz = Dense(2048)(xz)
-        xz = LeakyReLU(0.1)(xz)
 
         xz = Concatenate(axis=-1)([x, z])
         xz = Dropout(0.2)(xz)

@@ -13,13 +13,14 @@ from .base import BaseModel
 from .utils import *
 from .layers import *
 
+
 class VAE(BaseModel):
     def __init__(self,
-        input_shape=(64, 64, 3),
-        z_dims = 128,
-        name='vae',
-        **kwargs
-    ):
+                 input_shape=(64, 64, 3),
+                 z_dims=128,
+                 name='vae',
+                 **kwargs
+                 ):
         super(VAE, self).__init__(input_shape=input_shape, name=name, **kwargs)
 
         self.z_dims = z_dims
@@ -32,7 +33,7 @@ class VAE(BaseModel):
 
     def train_on_batch(self, x_batch):
         loss = self.vae_trainer.train_on_batch(x_batch, x_batch)
-        return { 'loss': loss }
+        return {'loss': loss}
 
     def predict(self, z_samples):
         return self.f_dec.predict(z_samples)
@@ -48,7 +49,7 @@ class VAE(BaseModel):
         vae_loss = VAELossLayer()([x_true, x_pred, z_avg, z_log_var])
 
         self.vae_trainer = Model(inputs=[x_true],
-                             outputs=[vae_loss])
+                                 outputs=[vae_loss])
         self.vae_trainer.compile(loss=[zero_loss],
                                  optimizer=Adam(lr=2.0e-4, beta_1=0.5))
 
@@ -61,9 +62,9 @@ class VAE(BaseModel):
         inputs = Input(shape=self.input_shape)
 
         x = BasicConvLayer(filters=64, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=128, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=256, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=256, strides=(2, 2))(inputs)
+        x = BasicConvLayer(filters=128, strides=(2, 2))(x)
+        x = BasicConvLayer(filters=256, strides=(2, 2))(x)
+        #x = BasicConvLayer(filters=512, strides=(2, 2))(x)
 
         x = Flatten()(x)
         x = Dense(1024)(x)
@@ -86,6 +87,7 @@ class VAE(BaseModel):
 
         x = Reshape((w, w, 256))(x)
 
+        #x = BasicDeconvLayer(filters=512, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=256, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=128, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=64, strides=(2, 2))(x)

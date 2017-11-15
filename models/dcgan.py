@@ -14,6 +14,7 @@ from .base import BaseModel
 from .utils import *
 from .layers import *
 
+
 class DiscriminatorLossLayer(Layer):
     __name__ = 'discriminator_loss_layer'
 
@@ -39,6 +40,7 @@ class DiscriminatorLossLayer(Layer):
 
         return y_real
 
+
 class GeneratorLossLayer(Layer):
     __name__ = 'generator_loss_layer'
 
@@ -61,6 +63,7 @@ class GeneratorLossLayer(Layer):
 
         return y_fake
 
+
 def discriminator_accuracy(y_real, y_fake):
     def accfun(y0, y1):
         y_pos = K.ones_like(y_real)
@@ -73,6 +76,7 @@ def discriminator_accuracy(y_real, y_fake):
 
     return accfun
 
+
 def generator_accuracy(y_fake):
     def accfun(y0, y1):
         y_pos = K.ones_like(y_fake)
@@ -83,13 +87,14 @@ def generator_accuracy(y_fake):
 
     return accfun
 
+
 class DCGAN(BaseModel):
     def __init__(self,
-        input_shape=(64, 64, 3),
-        z_dims = 128,
-        name='dcgan',
-        **kwargs
-    ):
+                 input_shape=(64, 64, 3),
+                 z_dims=128,
+                 name='dcgan',
+                 **kwargs
+                 ):
         super(DCGAN, self).__init__(input_shape=input_shape, name=name, **kwargs)
 
         self.z_dims = z_dims
@@ -168,9 +173,9 @@ class DCGAN(BaseModel):
         inputs = Input(shape=self.input_shape)
 
         x = BasicConvLayer(filters=64, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=128, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=256, strides=(2, 2))(inputs)
-        x = BasicConvLayer(filters=256, strides=(2, 2))(inputs)
+        x = BasicConvLayer(filters=128, strides=(2, 2))(x)
+        x = BasicConvLayer(filters=256, strides=(2, 2))(x)
+        #x = BasicConvLayer(filters=512, strides=(2, 2))(x)
 
         x = Flatten()(x)
         x = Dense(1024)(x)
@@ -190,6 +195,7 @@ class DCGAN(BaseModel):
 
         x = Reshape((w, w, 256))(x)
 
+        #x = BasicDeconvLayer(filters=512, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=256, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=128, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=64, strides=(2, 2))(x)
