@@ -7,10 +7,12 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import numpy as np
 import matplotlib
+
 matplotlib.use('Agg')
 
 from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI
 from datasets import load_data, mnist
+from datasets.datasets import load_data
 
 models = {
     'vae': VAE,
@@ -20,6 +22,7 @@ models = {
     'began': BEGAN,
     'ali': ALI
 }
+
 
 def main():
     # Parsing arguments
@@ -45,18 +48,18 @@ def main():
 
     # Load datasets
     if args.dataset == 'mnist':
-        datasets = mnist.load_data()
+        dataset = mnist.load_data()
     elif args.dataset == 'svhn':
-        datasets = svhn.load_data()
+        dataset = svhn.load_data()
     else:
-        datasets = load_data(args.dataset)
+        dataset = load_data(args.dataset)
 
     # Construct model
     if args.model not in models:
         raise Exception('Unknown model:', args.model)
 
     model = models[args.model](
-        input_shape=datasets.shape[1:],
+        input_shape=dataset.shape[1:],
         z_dims=args.zdims,
         output=args.output
     )
@@ -68,12 +71,13 @@ def main():
         model.load_model(args.resume)
 
     # Training loop
-    datasets = datasets.images * 2.0 - 1.0
+    dataset = dataset.images * 2.0 - 1.0
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
-    model.main_loop(datasets, samples,
-        epochs=args.epoch,
-        batchsize=args.batchsize,
-        reporter=['loss', 'g_loss', 'd_loss', 'g_acc', 'd_acc'])
+    model.main_loop(dataset, samples,
+                    epochs=args.epoch,
+                    batchsize=args.batchsize,
+                    reporter=['loss', 'g_loss', 'd_loss', 'g_acc', 'd_acc'])
+
 
 if __name__ == '__main__':
     main()
