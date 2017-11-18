@@ -3,6 +3,8 @@ import sys
 import math
 import argparse
 
+from tqdm import tqdm
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import numpy as np
@@ -70,8 +72,10 @@ def main():
     if args.resume is not None:
         model.load_model(args.resume)
 
+    #dataset = np.asarray(dataset.images, 'float32')
+    dataset = dataset.images
+
     # Training loop
-    dataset = dataset.images * 2.0 - 1.0
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
     model.main_loop(dataset, samples,
                     epochs=args.epoch,

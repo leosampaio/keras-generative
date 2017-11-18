@@ -105,12 +105,15 @@ class ALI(BaseModel):
 
         z_fake = np.random.normal(size=(batchsize, self.z_dims)).astype('float32')
 
-        i = 0
+        retrained_times = 0
         while True:
             g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_fake], y_pos)
-            i += 1
-            if g_loss < 5 or i > 20:
+
+            if g_loss < 5 or retrained_times > 20:
                 break
+            retrained_times += 1
+        if retrained_times > 0:
+            print('Retrained Generator {} time(s)'.format(retrained_times))
 
         d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_fake], y_neg)
 

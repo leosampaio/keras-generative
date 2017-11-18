@@ -1,6 +1,7 @@
 import h5py
 import numpy as np
 
+
 class Dataset(object):
     def __init__(self):
         self.images = None
@@ -13,11 +14,13 @@ class Dataset(object):
 
     shape = property(_get_shape)
 
+
 class ConditionalDataset(Dataset):
     def __init__(self):
         super(ConditionalDataset, self).__init__()
         self.attrs = None
         self.attr_names = None
+
 
 class PairwiseDataset(object):
     def __init__(self, x_data, y_data):
@@ -48,16 +51,34 @@ class PairwiseDataset(object):
 
     shape = property(_get_shape)
 
+
 def load_data(filename, size=-1):
     f = h5py.File(filename)
 
     dset = ConditionalDataset()
-    dset.images = np.asarray(f['images'], 'float32') / 255.0
-    dset.attrs = np.asarray(f['attrs'], 'float32')
-    dset.attr_names = np.asarray(f['attr_names'])
+    dset.images = f['images']
+
+    # dset.images = np.asarray(f['images'], 'float32') / 255.0
+    # dset.attrs = np.asarray(f['attrs'], 'float32')
+    # dset.attr_names = np.asarray(f['attr_names'])
 
     if size > 0:
         dset.images = dset.images[:size]
-        dset.attrs = dset.attrs[:size]
+        # dset.attrs = dset.attrs[:size]
 
     return dset
+
+
+def display_random():
+    dset = load_data('/home/alex/datasets/multi_330k_r_pr.hdf5')
+    imgs = []
+    import random
+    for idx in [random.randint(0, 330000) for _ in range(5)]:
+        imgs.append(dset.images[idx])
+
+    imgs = np.asarray(imgs, 'float32')
+    imgs = imgs * 0.5 + 0.5
+    imgs = np.clip(imgs, 0.0, 1.0)
+    import matplotlib.pyplot as plt
+    for idx, img in enumerate(imgs):
+        plt.imsave('{}.png'.format(idx), img)

@@ -4,6 +4,7 @@ import time
 import numpy as np
 
 import matplotlib
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -13,6 +14,7 @@ from abc import ABCMeta, abstractmethod
 
 from .utils import *
 
+
 def time_format(t):
     m, s = divmod(t, 60)
     m = int(m)
@@ -21,6 +23,7 @@ def time_format(t):
         return '%d sec' % s
     else:
         return '%d min %d sec' % (m, s)
+
 
 class BaseModel(metaclass=ABCMeta):
     '''
@@ -91,7 +94,7 @@ class BaseModel(metaclass=ABCMeta):
             start_time = time.time()
             for b in range(0, num_data, batchsize):
                 bsize = min(batchsize, num_data - b)
-                indx = perm[b:b+bsize]
+                indx = perm[b:b + bsize]
 
                 # Get batch and train on it
                 x_batch = self.make_batch(datasets, indx)
@@ -115,7 +118,7 @@ class BaseModel(metaclass=ABCMeta):
                 sys.stdout.flush()
 
                 # Save generated images
-                if (b + bsize) % 10000 == 0 or (b+ bsize) == num_data:
+                if (b + bsize) % 10000 == 0 or (b + bsize) == num_data:
                     outfile = os.path.join(res_out_dir, 'epoch_%04d_batch_%d.png' % (e + 1, b + bsize))
                     self.save_images(samples, outfile)
 
@@ -132,7 +135,12 @@ class BaseModel(metaclass=ABCMeta):
         '''
         Get batch from datasets
         '''
-        return datasets[indx]
+        batch = []
+        for idx in indx:
+            batch.append(datasets[idx])
+        batch = np.asarray(batch, 'float32')
+
+        return batch
 
     def save_images(self, samples, filename):
         '''
@@ -180,7 +188,6 @@ class BaseModel(metaclass=ABCMeta):
         Plase override "predict" method in the derived model!
         '''
         pass
-
 
     @abstractmethod
     def train_on_batch(self, x_batch):
