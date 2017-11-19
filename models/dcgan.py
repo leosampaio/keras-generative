@@ -110,18 +110,7 @@ class DCGAN(BaseModel):
         batchsize = len(x_real)
         dummy = np.zeros(batchsize, dtype='float32')
 
-        z_sample = np.random.uniform(-1.0, 1.0, size=(batchsize, self.z_dims))
-        z_sample = z_sample.astype('float32')
-
-        retrained_times = 0
-        while True:
-            g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_sample], dummy)
-
-            if g_loss < 5 or retrained_times > 20:
-                break
-            retrained_times += 1
-        if retrained_times > 0:
-            print('Retrained Generator {} time(s)'.format(retrained_times))
+        z_sample = np.random.normal(size=(batchsize, self.z_dims)).astype('float32')
 
         retrained_times = 0
         while True:
@@ -132,6 +121,16 @@ class DCGAN(BaseModel):
             retrained_times += 1
         if retrained_times > 0:
             print('Retrained Discriminator {} time(s)'.format(retrained_times))
+
+        retrained_times = 0
+        while True:
+            g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_sample], dummy)
+
+            if g_loss < 5 or retrained_times > 20:
+                break
+            retrained_times += 1
+        if retrained_times > 0:
+            print('Retrained Generator {} time(s)'.format(retrained_times))
 
         loss = {
             'g_loss': g_loss,
@@ -212,12 +211,18 @@ class DCGAN(BaseModel):
 
         x = Reshape((w, w, 256))(x)
 
-        # x = BasicDeconvLayer(filters=256, strides=(2, 2))(x)
-        x = BasicDeconvLayer(filters=256, strides=(2, 2))(x)
-        x = BasicDeconvLayer(filters=128, strides=(2, 2))(x)
-        x = BasicDeconvLayer(filters=64, strides=(2, 2))(x)
+        # x = BasicDeconvLayer(filters=256, strides=(2, 2), activation='relu')(x)
+        x = BasicDeconvLayer(filters=256, strides=(2, 2), activation='relu')(x)
+        x = BasicDeconvLayer(filters=128, strides=(2, 2), activation='relu')(x)
+        x = BasicDeconvLayer(filters=64, strides=(2, 2), activation='relu')(x)
 
         d = self.input_shape[2]
         x = BasicDeconvLayer(filters=d, strides=(1, 1), bnorm=False, activation='tanh')(x)
 
         return Model(inputs, x)
+
+    def save_model(self, out_dir, epoch):
+        self.trainers['f_dis'] = self.f_dis
+        super().save_model(out_dir, epoch)
+        # remove f_dis from trainers to not load its weights when calling load_model()
+        del self.trainers['f_dis']

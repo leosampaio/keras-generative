@@ -243,3 +243,9 @@ class ALI(BaseModel):
         xz = Activation('sigmoid')(xz)
 
         return Model([x_inputs, z_inputs], xz)
+
+    def save_model(self, out_dir, epoch):
+        self.trainers['f_D'] = self.f_D
+        super().save_model(out_dir, epoch)
+        # remove f_dis from trainers to not load its weights when calling load_model()
+        del self.trainers['f_D']
