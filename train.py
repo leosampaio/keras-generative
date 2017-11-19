@@ -72,7 +72,6 @@ def main():
     if args.resume is not None:
         model.load_model(args.resume)
 
-    #dataset = np.asarray(dataset.images, 'float32')
     dataset = dataset.images
 
     # Training loop

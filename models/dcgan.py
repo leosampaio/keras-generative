@@ -123,7 +123,15 @@ class DCGAN(BaseModel):
         if retrained_times > 0:
             print('Retrained Generator {} time(s)'.format(retrained_times))
 
-        d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_sample], dummy)
+        retrained_times = 0
+        while True:
+            d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_sample], dummy)
+
+            if d_loss < 5 or retrained_times > 20:
+                break
+            retrained_times += 1
+        if retrained_times > 0:
+            print('Retrained Discriminator {} time(s)'.format(retrained_times))
 
         loss = {
             'g_loss': g_loss,
@@ -184,7 +192,7 @@ class DCGAN(BaseModel):
         x = BasicConvLayer(filters=64, strides=(2, 2))(inputs)
         x = BasicConvLayer(filters=128, strides=(2, 2))(x)
         x = BasicConvLayer(filters=256, strides=(2, 2))(x)
-        x = BasicConvLayer(filters=512, strides=(2, 2))(x)
+        x = BasicConvLayer(filters=256, strides=(2, 2))(x)
 
         x = Flatten()(x)
         x = Dense(1024)(x)
@@ -204,7 +212,7 @@ class DCGAN(BaseModel):
 
         x = Reshape((w, w, 256))(x)
 
-        #x = BasicDeconvLayer(filters=512, strides=(2, 2))(x)
+        # x = BasicDeconvLayer(filters=256, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=256, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=128, strides=(2, 2))(x)
         x = BasicDeconvLayer(filters=64, strides=(2, 2))(x)
