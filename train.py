@@ -74,8 +74,11 @@ def main():
 
     dataset = dataset.images
 
-    # Training loop
+    # Use the same samples for all trainings - useful when resuming training
+    np.random.seed(123)
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
+    np.random.seed()
+    # Training loop
     model.main_loop(dataset, samples,
                     epochs=args.epoch,
                     batchsize=args.batchsize,
