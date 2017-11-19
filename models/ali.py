@@ -115,7 +115,15 @@ class ALI(BaseModel):
         if retrained_times > 0:
             print('Retrained Generator {} time(s)'.format(retrained_times))
 
-        d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_fake], y_neg)
+        retrained_times = 0
+        while True:
+            d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_fake], y_neg)
+
+            if d_loss < 5 or retrained_times > 20:
+                break
+            retrained_times += 1
+        if retrained_times > 0:
+            print('Retrained Discriminator {} time(s)'.format(retrained_times))
 
         losses = {
             'g_loss': g_loss,
