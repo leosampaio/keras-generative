@@ -1,5 +1,5 @@
-from keras import Input, Model
-from keras.layers import Dense, BatchNormalization, Activation, Reshape, Dropout, Flatten
+from keras.models import Model
+from keras.layers import Dense, BatchNormalization, Activation, Reshape, Dropout, Flatten, Input
 
 from models import DCGAN, VAE, ImprovedGAN, ALI
 from models.layers import BasicDeconvLayer, BasicConvLayer
@@ -119,6 +119,10 @@ class DropoutALI(ALI):
 
 
 class VeryDcgan(DCGAN):
+    def __init__(self, *args, **kwargs):
+        kwargs['name'] = 'vdcgan'
+        super().__init__(*args, **kwargs)
+
     def build_decoder(self):
         inputs = Input(shape=(self.z_dims,))
         w = self.input_shape[0] // (2 ** 3)
@@ -128,15 +132,15 @@ class VeryDcgan(DCGAN):
 
         x = Reshape((w, w, 256))(x)
 
-        x = BasicDeconvLayer(filters=512, strides=(2, 2), activation='relu')(x)
+        # x = BasicDeconvLayer(filters=512, strides=2, activation='relu')(x)
+        # x = BasicDeconvLayer(filters=512, strides=2, activation='relu')(x)
+        # x = BasicDeconvLayer(filters=256, strides=2, activation='relu')(x)
+        x = BasicDeconvLayer(filters=256, strides=1, activation='relu')(x)
         x = Dropout(0.5)(x)
-        x = BasicDeconvLayer(filters=512, strides=(2, 2), activation='relu')(x)
+        x = BasicDeconvLayer(filters=256, strides=1, activation='relu')(x)
         x = Dropout(0.5)(x)
-        # x = BasicDeconvLayer(filters=512, strides=(2, 2), activation='relu')(x)
-        # x = Dropout(0.5)(x)
-        # x = BasicDeconvLayer(filters=512, strides=(2, 2), activation='relu')(x)
-        # x = BasicDeconvLayer(filters=512, strides=(2, 2), activation='relu')(x)
-        x = BasicDeconvLayer(filters=256, strides=(2, 2), activation='relu')(x)
+        x = BasicDeconvLayer(filters=128, strides=(2, 2), activation='relu')(x)
+        x = Dropout(0.5)(x)
         x = BasicDeconvLayer(filters=128, strides=(2, 2), activation='relu')(x)
         x = BasicDeconvLayer(filters=64, strides=(2, 2), activation='relu')(x)
         d = self.input_shape[2]
@@ -150,12 +154,9 @@ class VeryDcgan(DCGAN):
         x = BasicConvLayer(filters=64, strides=(2, 2))(inputs)
         x = BasicConvLayer(filters=128, strides=(2, 2))(x)
         x = BasicConvLayer(filters=256, strides=(2, 2))(x)
+        x = BasicConvLayer(filters=256, strides=(2, 2))(x)
         x = BasicConvLayer(filters=512, strides=(2, 2))(x)
         x = BasicConvLayer(filters=512, strides=(2, 2))(x)
-        x = BasicConvLayer(filters=512, strides=(2, 2))(x)
-        # x = BasicConvLayer(filters=512, strides=(2, 2))(x)
-        # x = BasicConvLayer(filters=512, strides=(2, 2))(x)
-
         x = Flatten()(x)
         x = Dense(1024)(x)
         x = Activation('relu')(x)
