@@ -5,6 +5,7 @@ from .improvedgan import ImprovedGAN
 from .ebgan import EBGAN
 from .began import BEGAN
 from .ali import ALI
+from .aae import AAE
 
 # Conditional generative models
 from .cvae import CVAE
