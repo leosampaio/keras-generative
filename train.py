@@ -12,7 +12,7 @@ import matplotlib
 
 matplotlib.use('Agg')
 
-from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE
+from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE, BinAAE, AAE2, DrAAE2
 from datasets import load_data, mnist
 from datasets.datasets import load_data
 
@@ -29,6 +29,9 @@ models = {
     'drimprovedgan': DropoutImprovedGAN,
     'drali': DropoutALI,
     'aae': AAE,
+    'binaae': BinAAE,
+    'aae2': AAE2,
+    'draae2': DrAAE2,
 }
 
 
