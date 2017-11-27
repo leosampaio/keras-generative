@@ -5,6 +5,8 @@ import argparse
 
 from tqdm import tqdm
 
+from models.hacked import VeryDcgan, DropoutDcgan, DropoutVae, DropoutALI, DropoutImprovedGAN
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 import numpy as np
@@ -22,7 +24,12 @@ models = {
     'improvedgan': ImprovedGAN,
     'ebgan': EBGAN,
     'began': BEGAN,
-    'ali': ALI
+    'ali': ALI,
+    'vdcgan': VeryDcgan,
+    'drdcgan': DropoutDcgan,
+    'drvae': DropoutVae,
+    'drimprovedgan': DropoutImprovedGAN,
+    'drali': DropoutALI,
 }
 
 
