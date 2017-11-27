@@ -3,8 +3,6 @@ import sys
 import math
 import argparse
 
-from tqdm import tqdm
-
 from models.hacked import VeryDcgan, DropoutDcgan, DropoutVae, DropoutALI, DropoutImprovedGAN
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -14,7 +12,7 @@ import matplotlib
 
 matplotlib.use('Agg')
 
-from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI
+from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE
 from datasets import load_data, mnist
 from datasets.datasets import load_data
 
@@ -30,6 +28,7 @@ models = {
     'drvae': DropoutVae,
     'drimprovedgan': DropoutImprovedGAN,
     'drali': DropoutALI,
+    'aae': AAE,
 }
 
 

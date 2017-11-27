@@ -57,6 +57,8 @@ class BaseModel(metaclass=ABCMeta):
 
         self.last_epoch = 0
 
+        self.dataset = None
+
     def check_input_shape(self, input_shape):
         # Check for CelebA
         if input_shape == (64, 64, 3):
@@ -93,11 +95,12 @@ class BaseModel(metaclass=ABCMeta):
         # Start training
         print('\n\n--- START TRAINING ---\n')
         num_data = len(datasets)
+        self.dataset = datasets
         for e in range(self.last_epoch, epochs):
             # perm = np.random.permutation(num_data)
-            start_time = time.time()
 
             for segment_idx in range(len(datasets) // SEGMENT_SIZE):
+                start_time = time.time()
                 perm = np.random.permutation(SEGMENT_SIZE)
                 num_data = SEGMENT_SIZE
                 print('\nLoading segment {}'.format(segment_idx))
@@ -116,9 +119,8 @@ class BaseModel(metaclass=ABCMeta):
                     print('\rEpoch #%d | %d / %d (%6.2f %%) ' % \
                           (e + 1, segment_idx * SEGMENT_SIZE + b + bsize, len(datasets), ratio), end='')
 
-                    for k in reporter:
-                        if k in losses:
-                            print('| %s = %8.6f ' % (k, losses[k]), end='')
+                    for k in losses.keys():
+                        print('| %s = %8.6f ' % (k, losses[k]), end='')
 
                     # Compute ETA
                     elapsed_time = time.time() - start_time
@@ -136,6 +138,9 @@ class BaseModel(metaclass=ABCMeta):
                     if self.test_mode:
                         print('\nFinish testing: %s' % self.name)
                         return
+
+                elapsed_time = time.time() - start_time
+                print('Took: {}\n'.format(elapsed_time))
 
             print('')
 
@@ -195,7 +200,7 @@ class BaseModel(metaclass=ABCMeta):
             getattr(self, k).load_weights(filename)
 
         # load epoch number
-        epoch = int(folder.split('_')[1].replace('/', ''))
+        epoch = int(folder.split('_')[-1].replace('/', ''))
         self.last_epoch = epoch
 
     @abstractmethod
