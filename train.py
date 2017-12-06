@@ -3,7 +3,7 @@ import sys
 import math
 import argparse
 
-from models.hacked import VeryDcgan, DropoutDcgan, DropoutVae, DropoutALI, DropoutImprovedGAN
+from models.hacked import VeryDcgan, DropoutDcgan, DropoutVae, DropoutALI, DropoutImprovedGAN, VeryDeepImprovedGAN
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -32,6 +32,7 @@ models = {
     'binaae': BinAAE,
     'aae2': AAE2,
     'draae2': DrAAE2,
+    'vdimprovedgan': VeryDeepImprovedGAN,
 }
 
 
