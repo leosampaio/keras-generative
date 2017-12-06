@@ -287,8 +287,8 @@ class AAE2(AAE):
                  use_dropout=False,
                  **kwargs
                  ):
-        super().__init__(input_shape=input_shape, z_dims=z_dims, name=name, decoder_loss=decoder_loss, **kwargs)
         self.use_dropout = use_dropout
+        super().__init__(input_shape=input_shape, z_dims=z_dims, name=name, decoder_loss=decoder_loss, **kwargs)
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -337,7 +337,8 @@ class DrAAE2(AAE2):
                  decoder_loss='mse',
                  **kwargs
                  ):
-        super().__init__(input_shape=input_shape, z_dims=z_dims, name=name, decoder_loss=decoder_loss, use_dropout=True,
+        kwargs['use_dropout'] = True
+        super().__init__(input_shape=input_shape, z_dims=z_dims, name=name, decoder_loss=decoder_loss,
                          **kwargs)
 
 
