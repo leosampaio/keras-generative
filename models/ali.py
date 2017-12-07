@@ -246,6 +246,8 @@ class ALI(BaseModel):
 
     def save_model(self, out_dir, epoch):
         self.trainers['f_D'] = self.f_D
+        self.trainers['f_Gz'] = self.f_Gz
         super().save_model(out_dir, epoch)
         # remove f_dis from trainers to not load its weights when calling load_model()
         del self.trainers['f_D']
+        del self.trainers['f_Gz']
