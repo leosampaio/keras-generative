@@ -14,6 +14,8 @@ from abc import ABCMeta, abstractmethod
 
 from .utils import *
 
+# number of training images to store in memory at once
+# larger datasets are split into segments of this size
 SEGMENT_SIZE = 100 * 1000
 
 
@@ -216,3 +218,8 @@ class BaseModel(metaclass=ABCMeta):
         Plase override "train_on_batch" method in the derived model!
         '''
         pass
+
+    def predict_images(self, z_sample):
+        predictions = self.predict(z_sample) * 0.5 + 0.5
+        images = np.clip(predictions, 0.0, 1.0)
+        return images
