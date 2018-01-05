@@ -26,23 +26,24 @@ def slerp(val, low, high):
 
 def interpolate_vectors(a, b, steps=10):
     interp = np.zeros((steps,) + a.shape)
+    interp[0] = a
     for i in range(a.shape[0]):
-        for step in range(steps - 1):
-            interp[step][i] = a[i] + (b[i] - a[i]) / steps * step
+        for step in range(1, steps - 1):
+            interp[step][i] = a[i] + (b[i] - a[i]) / (steps - 1) * step
     interp[steps - 1] = b
     return interp
 
 
-def plot_images(images, filename):
+def plot_images(images, filename, num_samples=10, num_steps=10):
     """
-    :param images: numpy array of shape (100, None, None ,3)
+    :param images: numpy array of shape (None, None, None ,3)
     :param filename:
     :return:
     """
 
     fig = plt.figure(figsize=(8, 8))
-    grid = gridspec.GridSpec(10, 10, wspace=0.1, hspace=0.1)
-    for i in range(100):
+    grid = gridspec.GridSpec(num_samples, num_steps, wspace=0.1, hspace=0.1)
+    for i in range(num_samples * num_steps):
         ax = plt.Subplot(fig, grid[i])
         ax.imshow(images[i, :, :, :], interpolation='none', vmin=0.0, vmax=1.0)
         ax.axis('off')
@@ -80,7 +81,7 @@ def main():
 
     interpolations = random_interpolations(args.z_dims, args.num_samples, args.num_steps)
     images = model.predict_images(interpolations)
-    plot_images(images, 'test.png')
+    plot_images(images, 'test.png', args.num_samples, args.num_steps)
 
 
 if __name__ == '__main__':
