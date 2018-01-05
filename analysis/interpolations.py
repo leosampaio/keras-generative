@@ -1,4 +1,7 @@
 import argparse
+import os
+
+from tqdm import tqdm
 
 from models import ALI
 import numpy as np
@@ -40,7 +43,6 @@ def plot_images(images, filename, num_samples=10, num_steps=10):
     :param filename:
     :return:
     """
-
     fig = plt.figure(figsize=(8, 8))
     grid = gridspec.GridSpec(num_samples, num_steps, wspace=0.1, hspace=0.1)
     for i in range(num_samples * num_steps):
@@ -52,13 +54,29 @@ def plot_images(images, filename, num_samples=10, num_steps=10):
     plt.close(fig)
 
 
-def random_interpolations(z_dims, num_samples=10, num_steps=10):
-    point_a = np.random.normal(size=(num_samples, z_dims,)).astype(np.float32)
-    point_b = np.random.normal(size=(num_samples, z_dims,)).astype(np.float32)
-    interpolations = interpolate_vectors(point_a, point_b, steps=num_steps)
+def interpolations_point2point(z_dims, num_samples=10, num_steps=10):
+    points_a = np.random.normal(size=(num_samples, z_dims,)).astype(np.float32)
+    points_b = np.random.normal(size=(num_samples, z_dims,)).astype(np.float32)
+    interpolations = interpolate_vectors(points_a, points_b, steps=num_steps)
     interpolations = interpolations.reshape((num_samples * num_steps, z_dims))
     interpolations = np.rot90(interpolations.reshape((num_samples, num_steps, z_dims))).reshape(
         (num_samples * num_steps, z_dims))
+    return interpolations
+
+
+def interpolations_walk(z_dims, num_steps=10):
+    points = np.random.normal(size=(z_dims,)).astype(np.float32)
+    interpolations = np.zeros((z_dims, num_steps, z_dims))
+    for dim_id in range(z_dims):
+        points_a = points.copy()
+        points_b = points.copy()
+
+        points_a[dim_id] = -1
+        points_b[dim_id] = 1
+
+        interpolations[dim_id, :, :] = interpolate_vectors(points_a, points_b, num_steps)
+
+    interpolations = interpolations.reshape((num_steps * z_dims, z_dims))
     return interpolations
 
 
@@ -69,8 +87,11 @@ def main():
     parser.add_argument('--num_samples', type=int, default=10)
     parser.add_argument('--num_steps', type=int, default=10)
     parser.add_argument('--z_dims', type=int, default=256)
-
     args = parser.parse_args()
+
+    output_dir = 'output'
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
 
     model = ALI(
         input_shape=(64, 64, 3),
@@ -79,9 +100,20 @@ def main():
     )
     model.load_model(args.weights)
 
-    interpolations = random_interpolations(args.z_dims, args.num_samples, args.num_steps)
+    # point to point interpoaltions
+    interpolations = interpolations_point2point(args.z_dims, args.num_samples, args.num_steps)
     images = model.predict_images(interpolations)
-    plot_images(images, 'test.png', args.num_samples, args.num_steps)
+    plot_images(images, os.path.join(output_dir, 'p2p.png'), args.num_samples, args.num_steps)
+
+    # walk along a dimension
+    interpolations = interpolations_walk(args.z_dims, num_steps=args.num_steps)
+    images = model.predict_images(interpolations)
+    step = 10
+    for dim_id in tqdm(range(0, args.z_dims - step, step)):
+        plot_images(images[dim_id * args.num_steps:(dim_id + step) * args.num_steps, :, :, :],
+                    os.path.join(output_dir, 'walk_{}.png'.format(dim_id)), step, args.num_steps)
+    plot_images(images[-step * args.num_steps:, :, :, :],
+                os.path.join(output_dir, 'walk_{}.png'.format(dim_id + step)), step, args.num_steps)
 
 
 if __name__ == '__main__':
