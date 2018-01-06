@@ -3,7 +3,7 @@ import os
 
 from tqdm import tqdm
 
-from models import ALI
+import models
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -107,18 +107,22 @@ def interpolations_walk(z_dims, num_steps=10, method='slerp'):
 
 def main():
     parser = argparse.ArgumentParser(description='interpolations')
+    parser.add_argument('--model', type=str, default='ALI')
     parser.add_argument('--weights', type=str,
                         default='/home/alex/Desktop/proj/sign-lang/keras-generative/out_bbc/ali/weights/epoch_00005')
     parser.add_argument('--num_samples', type=int, default=10)
     parser.add_argument('--num_steps', type=int, default=10)
     parser.add_argument('--z_dims', type=int, default=256)
+    parser.add_argument('--method', type=str, default='slerp',
+                        help='Interpolation method. slerp - great circle, other - linear')
+    parser.add_argument('--output', type=str, default='output', help='Output directory')
     args = parser.parse_args()
 
-    output_dir = 'output'
+    output_dir = '{}_{}'.format(args.output, args.model)
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    model = ALI(
+    model = getattr(models, args.model)(
         input_shape=(64, 64, 3),
         z_dims=args.z_dims,
         output=''
@@ -126,12 +130,12 @@ def main():
     model.load_model(args.weights)
 
     # point to point interpolations
-    interpolations = interpolations_point2point(args.z_dims, args.num_samples, args.num_steps)
+    interpolations = interpolations_point2point(args.z_dims, args.num_samples, args.num_steps, method=args.method)
     images = model.predict_images(interpolations)
     plot_images(images, os.path.join(output_dir, 'p2p.png'), args.num_samples, args.num_steps)
 
     # walk along a dimension
-    interpolations = interpolations_walk(args.z_dims, num_steps=args.num_steps)
+    interpolations = interpolations_walk(args.z_dims, num_steps=args.num_steps, method=args.method)
     images = model.predict_images(interpolations)
     step = 10
     for dim_id in tqdm(range(0, args.z_dims - step, step)):
