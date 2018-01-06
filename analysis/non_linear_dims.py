@@ -59,16 +59,32 @@ def main():
     outliers_ids = np.argwhere(np.abs(ratios - ratios.mean()) > 2 * ratios.std())
     dim_id_counts = Counter([idx[0] for idx in outliers_ids])
     count_border_val = args.num_steps // 2 + 1
-    # dimensions where a big change in pixel values occured in less than half steps
+    # # dimensions where a big change in pixel values occured in less than half steps
     sudden_change_ids = [dim_id for dim_id, dim_count in dim_id_counts.items() if dim_count < count_border_val]
+    sudden_change_ids = [dim_id for dim_id, dim_count in dim_id_counts.items() if dim_count < 2]
+    sudden_change_ids_filtered = []
+    for dim_id in sudden_change_ids:
+        # double check if it is really a sudden change - if the mean of the ratios for the whole dimension
+        # without the outlier is within a plausible range of values
+        step_id = [idx[1] for idx in outliers_ids if idx[0] == dim_id][0]
+        if ratios[dim_id].sum() - ratios[dim_id, step_id] / (args.num_steps - 1) < 2 * ratios.std():
+            sudden_change_ids_filtered.append(dim_id)
+    sudden_change_ids = sudden_change_ids_filtered
     # dimensions where a big change in pixel values occured in more than half steps
     smooth_change_ids = [dim_id for dim_id, dim_count in dim_id_counts.items() if dim_count >= count_border_val]
 
+    print('Sudden: {}, Smooth: {}'.format(len(sudden_change_ids), len(smooth_change_ids)))
     num_samples_to_plot = 10
     sudden_images = np.zeros(
-        (len(sudden_change_ids) + len(sudden_change_ids) % num_samples_to_plot, args.num_steps, 64, 64, 3))
+        (
+            len(sudden_change_ids) + num_samples_to_plot - len(sudden_change_ids) % num_samples_to_plot, args.num_steps,
+            64,
+            64, 3))
     smooth_images = np.zeros(
-        (len(smooth_change_ids) + len(smooth_change_ids) % num_samples_to_plot, args.num_steps, 64, 64, 3))
+        (
+            len(smooth_change_ids) + num_samples_to_plot - len(smooth_change_ids) % num_samples_to_plot, args.num_steps,
+            64,
+            64, 3))
 
     for idx, dim_id in enumerate(sudden_change_ids):
         sudden_images[idx] = images[dim_id * args.num_steps:(dim_id + 1) * args.num_steps]
