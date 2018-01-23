@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--output', type=str, default='output', help='Output directory')
     args = parser.parse_args()
 
-    output_dir = '{}_{}'.format(args.output, args.model)
+    output_dir = '{}_{}_{}'.format(args.output, args.model, args.z_dims)
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 

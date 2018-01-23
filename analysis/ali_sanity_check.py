@@ -45,7 +45,7 @@ def load_image(image_path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='clusters')
+    parser = argparse.ArgumentParser(description='Sanity Check: x -> z -> x\'')
     parser.add_argument('--model', type=str, default='ALI')
     parser.add_argument('--weights', type=str,
                         default='/home/alex/Desktop/proj/sign-lang/keras-generative/out_bbc/ali/weights/epoch_00005')
@@ -57,6 +57,7 @@ def main():
         print('No files found. Exiting.')
         exit()
     print(len(image_files))
+    random.seed(1)
     random.shuffle(image_files)
 
     max_samples = 50
@@ -91,7 +92,7 @@ def main():
         ax.axis('off')
         fig.add_subplot(ax)
 
-    fig.savefig('sanity_check.png', dpi=200)
+    fig.savefig('sanity_check_{}.png'.format(args.z_dims), dpi=200)
     plt.close(fig)
 
 

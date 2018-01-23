@@ -118,7 +118,7 @@ def main():
     parser.add_argument('--output', type=str, default='output', help='Output directory')
     args = parser.parse_args()
 
-    output_dir = '{}_{}'.format(args.output, args.model)
+    output_dir = '{}_{}_{}'.format(args.output, args.model, args.z_dims)
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
@@ -135,16 +135,18 @@ def main():
     plot_images(images, os.path.join(output_dir, 'p2p.png'), args.num_samples, args.num_steps)
 
     # walk along a dimension
-    interpolations = interpolations_walk(args.z_dims, num_steps=args.num_steps, method=args.method)
-    images = model.predict_images(interpolations)
-    step = 10
-    for dim_id in tqdm(range(0, args.z_dims - step, step)):
-        # plot interpolations for 10 next dimensions
-        plot_images(images[dim_id * args.num_steps:(dim_id + step) * args.num_steps, :, :, :],
-                    os.path.join(output_dir, 'walk_{}.png'.format(dim_id)), step, args.num_steps)
-    # plot the last number of dimensions (as 10 - the number of steps - isn't a divider of 128, 256 etc.)
-    plot_images(images[-step * args.num_steps:, :, :, :],
-                os.path.join(output_dir, 'walk_{}.png'.format(dim_id + step)), step, args.num_steps)
+    num_images = 3
+    for img_id in range(num_images):
+        interpolations = interpolations_walk(args.z_dims, num_steps=args.num_steps, method=args.method)
+        images = model.predict_images(interpolations)
+        step = 10
+        for dim_id in tqdm(range(0, args.z_dims - step, step)):
+            # plot interpolations for 10 next dimensions
+            plot_images(images[dim_id * args.num_steps:(dim_id + step) * args.num_steps, :, :, :],
+                        os.path.join(output_dir, 'walk_{}_{}.png'.format(img_id, dim_id)), step, args.num_steps)
+        # plot the last number of dimensions (as 10 - the number of steps - isn't a divider of 128, 256 etc.)
+        plot_images(images[-step * args.num_steps:, :, :, :],
+                    os.path.join(output_dir, 'walk_{}_{}.png'.format(img_id, dim_id + step)), step, args.num_steps)
 
 
 if __name__ == '__main__':
