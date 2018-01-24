@@ -25,6 +25,10 @@ class DiscriminatorLossLayer(Layer):
         y_pos = K.ones_like(y_real)
         y_neg = K.zeros_like(y_fake)
 
+        # num_to_switch = 15
+        # y_pos = K.concatenate([y_pos[:-num_to_switch], y_neg[:num_to_switch]], axis=0)
+        # y_neg = K.concatenate([y_neg[:-num_to_switch], y_pos[:num_to_switch]], axis=0)
+
         loss_real = keras.metrics.binary_crossentropy(y_pos, y_real)
         loss_fake = keras.metrics.binary_crossentropy(y_neg, y_fake)
 
@@ -98,18 +102,19 @@ class ALI(BaseModel):
 
         self.build_model()
 
-    def train_on_batch(self, x_real):
+    def train_on_batch(self, x_real, compute_grad_norms=False):
         batchsize = len(x_real)
         y_pos = np.ones(batchsize, dtype='float32')
         y_neg = np.zeros(batchsize, dtype='float32')
 
         z_fake = np.random.normal(size=(batchsize, self.z_dims)).astype('float32')
 
-        retrained_times = 0
+        max_loss = 5
+        retrained_times, max_retrains = 0, 20
         while True:
             g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_fake], y_pos)
 
-            if g_loss < 5 or retrained_times > 20:
+            if g_loss < max_loss or retrained_times >= max_retrains:
                 break
             retrained_times += 1
         if retrained_times > 0:
@@ -119,7 +124,7 @@ class ALI(BaseModel):
         while True:
             d_loss, d_acc = self.dis_trainer.train_on_batch([x_real, z_fake], y_neg)
 
-            if d_loss < 5 or retrained_times > 20:
+            if d_loss < max_loss or retrained_times >= max_retrains:
                 break
             retrained_times += 1
         if retrained_times > 0:
@@ -131,6 +136,16 @@ class ALI(BaseModel):
             'g_acc': g_acc,
             'd_acc': d_acc
         }
+
+        if compute_grad_norms:
+            # https://stackoverflow.com/questions/45694344/calculating-gradient-norm-wrt-weights-with-keras
+            grad_norm_func = get_gradient_norm_func(self.gen_trainer)
+            gen_grad_norm = grad_norm_func([x_real, z_fake, np.ones(batchsize), y_pos.reshape((batchsize, 1)), 1])
+            grad_norm_func = get_gradient_norm_func(self.dis_trainer)
+            dis_grad_norm = grad_norm_func([x_real, z_fake,  np.ones(batchsize), y_neg.reshape((batchsize, 1)), 1])
+            losses['g_norm'] = gen_grad_norm[0]
+            losses['d_norm'] = dis_grad_norm[0]
+
         return losses
 
     def predict(self, z_samples):

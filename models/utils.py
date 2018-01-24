@@ -98,3 +98,21 @@ def plot_reconstructions(x, y, random_imgs, interpolations, plotname):
 
     plt.savefig(plotname)
     plt.close()
+
+
+def get_gradient_norm_func(model):
+    # https://github.com/keras-team/keras/issues/2226
+    weights = model.trainable_weights  # weight tensors
+    #weights = [weight for weight in weights if model.get_layer(weight.name[:-2]).trainable]
+    gradients = model.optimizer.get_gradients(model.total_loss, weights)  # gradient tensors
+    summed_squares = [K.sum(K.square(g)) for g in gradients]
+    norm = K.sqrt(sum(summed_squares))
+    input_tensors = [model.inputs[0],  # input data
+                     model.inputs[1],
+                     model.sample_weights[0],  # how much to weight each sample by
+                     model.targets[0],  # labels
+                     K.learning_phase(),  # train or test mode
+                     ]
+
+    func = K.function(inputs=input_tensors, outputs=[norm])
+    return func

@@ -61,6 +61,8 @@ class BaseModel(metaclass=ABCMeta):
 
         self.dataset = None
 
+        self.g_losses, self.d_losses = [], []
+
     def check_input_shape(self, input_shape):
         # Check for CelebA
         if input_shape == (64, 64, 3):
@@ -98,6 +100,7 @@ class BaseModel(metaclass=ABCMeta):
         print('\n\n--- START TRAINING ---\n')
         num_data = len(datasets)
         self.dataset = datasets
+        self.g_losses, self.d_losses = [], []
         for e in range(self.last_epoch, epochs):
             # perm = np.random.permutation(num_data)
 
@@ -111,9 +114,12 @@ class BaseModel(metaclass=ABCMeta):
                     bsize = min(batchsize, num_data - b)
                     indx = perm[b:b + bsize]
 
+                    # every 20000 iterations save generated images and compute gradient norms
+                    checkpoint = (b + bsize) % 20000 == 0 or (b + bsize) == num_data
+
                     # Get batch and train on it
                     x_batch = self.make_batch(dataset, indx)
-                    losses = self.train_on_batch(x_batch)
+                    losses = self.train_on_batch(x_batch, checkpoint)
 
                     # Print current status
                     ratio = 100.0 * (b + bsize + segment_idx * SEGMENT_SIZE) / len(datasets)
@@ -131,11 +137,17 @@ class BaseModel(metaclass=ABCMeta):
 
                     sys.stdout.flush()
 
+                    self.g_losses.append(losses['g_loss'])
+                    self.d_losses.append(losses['d_loss'])
+                    self.save_losses_hist(out_dir)
                     # Save generated images
-                    if (b + bsize) % 20000 == 0 or (b + bsize) == num_data:
+                    if checkpoint:
+                        print('Gen gradient norm: {}, Dis gradient norm: {}'.format(losses.get('g_norm'),
+                                                                                    losses.get('d_norm')))
                         outfile = os.path.join(res_out_dir, 'epoch_%04d_batch_%d.png' % (
                             e + 1, segment_idx * SEGMENT_SIZE + b + bsize))
                         self.save_images(samples, outfile)
+                        self.save_losses_hist(out_dir)
 
                     if self.test_mode:
                         print('\nFinish testing: %s' % self.name)
@@ -148,6 +160,11 @@ class BaseModel(metaclass=ABCMeta):
 
             # Save current weights
             self.save_model(wgt_out_dir, e + 1)
+
+    def save_losses_hist(self, out_dir):
+        plt.plot(self.g_losses)
+        plt.plot(self.d_losses)
+        plt.savefig(os.path.join(out_dir, 'loss_hist.png'))
 
     def make_batch(self, datasets, indx):
         '''
@@ -213,7 +230,7 @@ class BaseModel(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def train_on_batch(self, x_batch):
+    def train_on_batch(self, x_batch, compute_grad_norms=False):
         '''
         Plase override "train_on_batch" method in the derived model!
         '''
