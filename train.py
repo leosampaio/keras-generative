@@ -56,6 +56,7 @@ def main():
     parser.add_argument('--testmode', action='store_true')
     parser.add_argument('--label_smoothing', default=0.0, type=float)
     parser.add_argument('--input_noise', default=0.0, type=float)
+    parser.add_argument('--swap_prob', default=0.1, type=float)
 
     args = parser.parse_args()
 
@@ -84,6 +85,7 @@ def main():
         output=args.output,
         label_smoothing=args.label_smoothing,
         input_noise=args.input_noise,
+        swap_prob=args.swap_prob,
     )
 
     if args.testmode:

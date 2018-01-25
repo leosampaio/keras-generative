@@ -1,4 +1,6 @@
 import os
+import random
+
 import numpy as np
 
 import keras
@@ -104,7 +106,19 @@ class ALI(BaseModel):
 
         self.last_d_loss = 10000000
 
+        self.swap_prob = kwargs.get('swap_prob', 0.0)
+        # save a checkpoint of the models each weights_checkpoint_depth iterations
+        self.weights_checkpoint_depth = 20
+        self.curr_checkpoint_iter = self.weights_checkpoint_depth
+        self.swap_iter_length = 5
+        self.gen_checkpoint_weights = None
+        self.dis_checkpoint_weights = None
+        self.gen_newest_weights = None
+        self.dis_newest_weights = None
+
     def train_on_batch(self, x_real, compute_grad_norms=False):
+        self.swap_weights()
+
         batchsize = len(x_real)
         y_pos, y_neg = ALI.get_labels(batchsize, self.label_smoothing)
 
@@ -274,3 +288,38 @@ class ALI(BaseModel):
         # remove f_dis from trainers to not load its weights when calling load_model()
         del self.trainers['f_D']
         del self.trainers['f_Gz']
+
+    def swap_weights(self):
+        if self.gen_newest_weights is not None or self.dis_newest_weights is not None:
+            self.swap_iter_length -= 1
+            if self.swap_iter_length == 0:
+                if self.gen_newest_weights is not None:
+                    print('Swapping generator weights back')
+                    self.gen_trainer.set_weights(self.gen_newest_weights)
+                    self.gen_newest_weights = None
+                elif self.dis_newest_weights is not None:
+                    print('Swapping discriminator weights back')
+                    self.dis_trainer.set_weights(self.dis_newest_weights)
+                    self.dis_newest_weights = None
+                self.swap_iter_length = 5
+        else:
+            if self.curr_checkpoint_iter == self.weights_checkpoint_depth:
+                # save checkpoints
+                self.gen_checkpoint_weights = self.gen_trainer.get_weights()
+                self.dis_checkpoint_weights = self.dis_trainer.get_weights()
+
+                self.curr_checkpoint_iter = 0
+
+            swap_gen = random.random() < self.swap_prob
+            swap_dis = random.random() < self.swap_prob
+
+            if swap_gen:
+                print('Swapping generator weights')
+                self.gen_newest_weights = self.gen_trainer.get_weights()
+                self.gen_trainer.set_weights(self.gen_checkpoint_weights)
+            elif swap_dis:
+                print('Swapping discriminator weights')
+                self.dis_newest_weights = self.dis_trainer.get_weights()
+                self.dis_trainer.set_weights(self.dis_checkpoint_weights)
+
+            self.curr_checkpoint_iter += 1
