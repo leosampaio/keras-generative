@@ -66,6 +66,7 @@ class BaseModel(metaclass=ABCMeta):
         self.g_losses, self.d_losses, self.losses_ratio = [], [], []
 
         self.label_smoothing = kwargs.get('label_smoothing', 0.0)
+        self.input_noise = kwargs.get('input_noise', 0.0)
 
     def check_input_shape(self, input_shape):
         # Check for CelebA
@@ -108,7 +109,8 @@ class BaseModel(metaclass=ABCMeta):
         for e in range(self.last_epoch, epochs):
             # perm = np.random.permutation(num_data)
 
-            for segment_idx in range(len(datasets) // SEGMENT_SIZE):
+            total_segments = len(datasets) // SEGMENT_SIZE
+            for segment_idx in range(total_segments):
                 start_time = time.time()
                 perm = np.random.permutation(SEGMENT_SIZE)
                 num_data = SEGMENT_SIZE
@@ -123,6 +125,7 @@ class BaseModel(metaclass=ABCMeta):
 
                     # Get batch and train on it
                     x_batch = self.make_batch(dataset, indx)
+                    x_batch = BaseModel.add_input_noise(x_batch, e, segment_idx, total_segments, self.input_noise)
                     losses = self.train_on_batch(x_batch, checkpoint)
 
                     # Print current status
@@ -266,3 +269,18 @@ class BaseModel(metaclass=ABCMeta):
             y_neg = np.zeros(batchsize, dtype='float32')
 
         return y_pos, y_neg
+
+    @staticmethod
+    def add_input_noise(x_batch, curr_epoch, curr_segment, total_segments, start_noise):
+        if start_noise == 0.0:
+            return x_batch
+
+        noise = np.random.normal(size=x_batch.shape)
+
+        noise_factor = (curr_segment / total_segments + curr_epoch * total_segments) or 1
+        noise_factor = start_noise / noise_factor
+        if noise_factor < 0.02:
+            return x_batch
+
+        noised_batch = x_batch + noise * noise_factor
+        return noised_batch

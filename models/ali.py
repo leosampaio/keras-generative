@@ -110,7 +110,11 @@ class ALI(BaseModel):
 
         z_fake = np.random.normal(size=(batchsize, self.z_dims)).astype('float32')
 
+        # indicates the upper for losses of the networks, i.e. a net will be retrained (although at most max_retrains
+        # times) until the loss is lower than the bound
         max_loss = 5
+        # also an upper bound but only for the generator network: the ratio of losses gen/dis (generator's loss can only
+        # be max_g_2_d_loss_ratio times higher than discriminator's loss
         max_g_2_d_loss_ratio = 4.5
         retrained_times, max_retrains = 0, 20
         while True:
@@ -146,7 +150,7 @@ class ALI(BaseModel):
             grad_norm_func = get_gradient_norm_func(self.gen_trainer)
             gen_grad_norm = grad_norm_func([x_real, z_fake, np.ones(batchsize), y_pos.reshape((batchsize, 1)), 1])
             grad_norm_func = get_gradient_norm_func(self.dis_trainer)
-            dis_grad_norm = grad_norm_func([x_real, z_fake,  np.ones(batchsize), y_neg.reshape((batchsize, 1)), 1])
+            dis_grad_norm = grad_norm_func([x_real, z_fake, np.ones(batchsize), y_neg.reshape((batchsize, 1)), 1])
             losses['g_norm'] = gen_grad_norm[0]
             losses['d_norm'] = dis_grad_norm[0]
 

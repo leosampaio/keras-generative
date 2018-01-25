@@ -136,30 +136,3 @@ class MobileNetALI(ALI):
 
         return Model([mobile_net.input, z_inputs], xz)
 
-
-class LocalALI(ALI):
-    def build_D(self):
-        x_inputs = Input(shape=self.input_shape)
-
-        x = BasicConvLayer(filters=128, kernel_size=(5, 5), strides=(2, 2), bnorm=True)(x_inputs)
-        x = BasicConvLayer(filters=256, kernel_size=(5, 5), strides=(2, 2), bnorm=True)(x)
-        x = BasicConvLayer(filters=256, kernel_size=(5, 5), strides=(2, 2), bnorm=True)(x)
-        x = BasicConvLayer(filters=512, kernel_size=(3, 3), bnorm=True)(x)
-        x = Flatten()(x)
-
-        z_inputs = Input(shape=(self.z_dims,))
-        z = Reshape((1, 1, self.z_dims))(z_inputs)
-        z = BasicConvLayer(filters=1024, kernel_size=(1, 1), dropout=0.2)(z)
-        z = BasicConvLayer(filters=1024, kernel_size=(1, 1), dropout=0.2)(z)
-        z = Flatten()(z)
-
-        xz = Concatenate(axis=-1)([x, z])
-        xz = Dropout(0.2)(xz)
-        xz = Dense(2048)(xz)
-        xz = LeakyReLU(0.1)(xz)
-
-        xz = Dropout(0.2)(xz)
-        xz = Dense(1)(xz)
-        xz = Activation('sigmoid')(xz)
-
-        return Model([x_inputs, z_inputs], xz)
