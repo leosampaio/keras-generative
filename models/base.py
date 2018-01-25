@@ -17,6 +17,8 @@ from .utils import *
 # number of training images to store in memory at once
 # larger datasets are split into segments of this size
 SEGMENT_SIZE = 100 * 1000
+GRAD_NORM_LIMIT = 100
+CHECKPOINT_ITERS = 20000
 
 
 def time_format(t):
@@ -61,7 +63,9 @@ class BaseModel(metaclass=ABCMeta):
 
         self.dataset = None
 
-        self.g_losses, self.d_losses = [], []
+        self.g_losses, self.d_losses, self.losses_ratio = [], [], []
+
+        self.label_smoothing = kwargs.get('label_smoothing', 0.0)
 
     def check_input_shape(self, input_shape):
         # Check for CelebA
@@ -100,7 +104,7 @@ class BaseModel(metaclass=ABCMeta):
         print('\n\n--- START TRAINING ---\n')
         num_data = len(datasets)
         self.dataset = datasets
-        self.g_losses, self.d_losses = [], []
+        self.g_losses, self.d_losses, self.losses_ratio = [], [], []
         for e in range(self.last_epoch, epochs):
             # perm = np.random.permutation(num_data)
 
@@ -115,7 +119,7 @@ class BaseModel(metaclass=ABCMeta):
                     indx = perm[b:b + bsize]
 
                     # every 20000 iterations save generated images and compute gradient norms
-                    checkpoint = (b + bsize) % 20000 == 0 or (b + bsize) == num_data
+                    checkpoint = (b + bsize) % CHECKPOINT_ITERS == 0 or (b + bsize) == num_data
 
                     # Get batch and train on it
                     x_batch = self.make_batch(dataset, indx)
@@ -137,13 +141,17 @@ class BaseModel(metaclass=ABCMeta):
 
                     sys.stdout.flush()
 
-                    self.g_losses.append(losses['g_loss'])
-                    self.d_losses.append(losses['d_loss'])
-                    self.save_losses_hist(out_dir)
+                    if b % (5 * batchsize) == 0:
+                        self.g_losses.append(losses['g_loss'])
+                        self.d_losses.append(losses['d_loss'])
+                        self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
+                        self.save_losses_hist(out_dir)
                     # Save generated images
                     if checkpoint:
                         print('Gen gradient norm: {}, Dis gradient norm: {}'.format(losses.get('g_norm'),
                                                                                     losses.get('d_norm')))
+                        # if losses.get('g_norm') > GRAD_NORM_LIMIT or losses.get('d_norm') > GRAD_NORM_LIMIT:
+                        #     print('Gradient norm exceeded {}. Exiting'.format(GRAD_NORM_LIMIT))
                         outfile = os.path.join(res_out_dir, 'epoch_%04d_batch_%d.png' % (
                             e + 1, segment_idx * SEGMENT_SIZE + b + bsize))
                         self.save_images(samples, outfile)
@@ -162,9 +170,16 @@ class BaseModel(metaclass=ABCMeta):
             self.save_model(wgt_out_dir, e + 1)
 
     def save_losses_hist(self, out_dir):
-        plt.plot(self.g_losses)
-        plt.plot(self.d_losses)
+        plt.plot(self.g_losses, label='Gen')
+        plt.plot(self.d_losses, label='Dis')
+        plt.legend()
         plt.savefig(os.path.join(out_dir, 'loss_hist.png'))
+        plt.close()
+
+        plt.plot(self.losses_ratio, label='G / D')
+        plt.legend()
+        plt.savefig(os.path.join(out_dir, 'losses_ratio.png'))
+        plt.close()
 
     def make_batch(self, datasets, indx):
         '''
@@ -240,3 +255,14 @@ class BaseModel(metaclass=ABCMeta):
         predictions = self.predict(z_sample) * 0.5 + 0.5
         images = np.clip(predictions, 0.0, 1.0)
         return images
+
+    @staticmethod
+    def get_labels(batchsize, smoothing=0.0):
+        if smoothing > 0.0:
+            y_pos = 1. - np.random.random((batchsize, )) * smoothing
+            y_neg = np.random.random((batchsize, )) * smoothing
+        else:
+            y_pos = np.ones(batchsize, dtype='float32')
+            y_neg = np.zeros(batchsize, dtype='float32')
+
+        return y_pos, y_neg

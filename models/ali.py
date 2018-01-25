@@ -102,19 +102,22 @@ class ALI(BaseModel):
 
         self.build_model()
 
+        self.last_d_loss = 10000000
+
     def train_on_batch(self, x_real, compute_grad_norms=False):
         batchsize = len(x_real)
-        y_pos = np.ones(batchsize, dtype='float32')
-        y_neg = np.zeros(batchsize, dtype='float32')
+        y_pos, y_neg = ALI.get_labels(batchsize, self.label_smoothing)
 
         z_fake = np.random.normal(size=(batchsize, self.z_dims)).astype('float32')
 
         max_loss = 5
+        max_g_2_d_loss_ratio = 4.5
         retrained_times, max_retrains = 0, 20
         while True:
             g_loss, g_acc = self.gen_trainer.train_on_batch([x_real, z_fake], y_pos)
 
-            if g_loss < max_loss or retrained_times >= max_retrains:
+            if (g_loss < max_loss and g_loss < self.last_d_loss * max_g_2_d_loss_ratio) \
+                    or retrained_times >= max_retrains:
                 break
             retrained_times += 1
         if retrained_times > 0:
@@ -129,6 +132,7 @@ class ALI(BaseModel):
             retrained_times += 1
         if retrained_times > 0:
             print('Retrained Discriminator {} time(s)'.format(retrained_times))
+        self.last_d_loss = d_loss
 
         losses = {
             'g_loss': g_loss,

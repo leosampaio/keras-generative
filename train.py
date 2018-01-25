@@ -12,7 +12,8 @@ import matplotlib
 
 matplotlib.use('Agg')
 
-from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE, BinAAE, AAE2, DrAAE2
+from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE, BinAAE, AAE2, DrAAE2, PaperALI, WiderALI, DeeperALI, \
+    LocallyConnALI, MobileNetALI
 from datasets import load_data, mnist
 from datasets.datasets import load_data
 
@@ -23,6 +24,11 @@ models = {
     'ebgan': EBGAN,
     'began': BEGAN,
     'ali': ALI,
+    'paper_ali': PaperALI,
+    'wider_ali': WiderALI,
+    'deeper_ali': DeeperALI,
+    'local_conn_ali': LocallyConnALI,
+    'mobile_ali': MobileNetALI,
     'vdcgan': VeryDcgan,
     'drdcgan': DropoutDcgan,
     'drvae': DropoutVae,
@@ -48,6 +54,7 @@ def main():
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--testmode', action='store_true')
+    parser.add_argument('--label_smoothing', default=0.0, type=float)
 
     args = parser.parse_args()
 
@@ -73,7 +80,8 @@ def main():
     model = models[args.model](
         input_shape=dataset.shape[1:],
         z_dims=args.zdims,
-        output=args.output
+        output=args.output,
+        label_smoothing=args.label_smoothing,
     )
 
     if args.testmode:
