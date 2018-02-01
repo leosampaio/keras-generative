@@ -88,6 +88,9 @@ class BaseModel(metaclass=ABCMeta):
         '''
         Main learning loop
         '''
+
+        global SEGMENT_SIZE
+
         # Create output directories if not exist
         out_dir = os.path.join(self.output, self.name)
         if not os.path.isdir(out_dir):
@@ -109,6 +112,8 @@ class BaseModel(metaclass=ABCMeta):
         for e in range(self.last_epoch, epochs):
             # perm = np.random.permutation(num_data)
 
+            if SEGMENT_SIZE > len(datasets): 
+                SEGMENT_SIZE = len(datasets)
             total_segments = len(datasets) // SEGMENT_SIZE
             for segment_idx in range(total_segments):
                 start_time = time.time()
@@ -128,20 +133,18 @@ class BaseModel(metaclass=ABCMeta):
                     x_batch = BaseModel.add_input_noise(x_batch, e, segment_idx, total_segments, self.input_noise)
                     losses = self.train_on_batch(x_batch, checkpoint)
 
-                    # Print current status
+                    # get current status
                     ratio = 100.0 * (b + bsize + segment_idx * SEGMENT_SIZE) / len(datasets)
-                    print(chr(27) + "[2K", end='')
-                    print('\rEpoch #%d | %d / %d (%6.2f %%) ' % \
-                          (e + 1, segment_idx * SEGMENT_SIZE + b + bsize, len(datasets), ratio), end='')
+                    status_string = "Epoch #{:04.0f} | {:06.0f} / {:06.0f} ({:6.2f}% )".format(e + 1, segment_idx * SEGMENT_SIZE + b + bsize, len(datasets), ratio)
 
                     for k in losses.keys():
-                        print('| %s = %8.6f ' % (k, losses[k]), end='')
+                        status_string = "{} | {} = {:8.6f}".format(status_string, k, losses[k])
 
-                    # Compute ETA
+                    # compute ETA
                     elapsed_time = time.time() - start_time
                     eta = elapsed_time / (b + bsize) * (len(datasets) - (b + bsize))
-                    print('| ETA: %s ' % time_format(eta), end='')
-
+                    status_string = "{} | ETA: {}".format(status_string, time_format(eta))
+                    print(status_string)
                     sys.stdout.flush()
 
                     if b % (5 * batchsize) == 0:

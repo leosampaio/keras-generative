@@ -17,6 +17,10 @@ from .base import BaseModel
 from .utils import *
 from .layers import *
 
+# from tensorflow.python import debug as tf_debug
+# sess = K.get_session()
+# sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+# K.set_session(sess)
 
 class DiscriminatorLossLayer(Layer):
     def __init__(self, **kwargs):
@@ -284,10 +288,12 @@ class ALI(BaseModel):
     def save_model(self, out_dir, epoch):
         self.trainers['f_D'] = self.f_D
         self.trainers['f_Gz'] = self.f_Gz
+        self.trainers['f_Gx'] = self.f_Gx
         super().save_model(out_dir, epoch)
         # remove f_dis from trainers to not load its weights when calling load_model()
         del self.trainers['f_D']
         del self.trainers['f_Gz']
+        del self.trainers['f_Gx']
 
     def swap_weights(self):
         if self.gen_newest_weights is not None or self.dis_newest_weights is not None:

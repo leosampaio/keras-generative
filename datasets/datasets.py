@@ -3,7 +3,9 @@ import numpy as np
 
 
 class Dataset(object):
-    def __init__(self):
+
+    def __init__(self, name):
+
         self.images = None
 
     def __len__(self):
@@ -16,6 +18,7 @@ class Dataset(object):
 
 
 class ConditionalDataset(Dataset):
+
     def __init__(self):
         super(ConditionalDataset, self).__init__()
         self.attrs = None
@@ -23,11 +26,12 @@ class ConditionalDataset(Dataset):
 
 
 class PairwiseDataset(object):
+
     def __init__(self, x_data, y_data):
         assert x_data.shape[1] == y_data.shape[1]
         assert x_data.shape[2] == y_data.shape[2]
         assert x_data.shape[3] == 1 or y_data.shape[3] == 1 or \
-               x_data.shape[3] == y_data.shape[3]
+            x_data.shape[3] == y_data.shape[3]
 
         if x_data.shape[3] != y_data.shape[3]:
             d = max(x_data.shape[3], y_data.shape[3])
@@ -52,21 +56,18 @@ class PairwiseDataset(object):
     shape = property(_get_shape)
 
 
-def load_data(filename, size=-1):
-    f = h5py.File(filename)
+def load_dataset(dataset_name):
+    if args.dataset == 'mnist':
+        dataset = ConditionalDataset()
+        dataset.images, dataset.attrs, dataset.attr_names = = mnist.load_data()
+    elif args.dataset == 'svhn':
+        dataset = ConditionalDataset()
+        dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data()
+    else:
+        dataset = ConditionalDataset()
+        dataset.images, dataset.attrs = load_general_dataset(dataset_name)
 
-    dset = ConditionalDataset()
-    dset.images = f['images']
-
-    # dset.images = np.asarray(f['images'], 'float32') / 255.0
-    # dset.attrs = np.asarray(f['attrs'], 'float32')
-    # dset.attr_names = np.asarray(f['attr_names'])
-
-    if size > 0:
-        dset.images = dset.images[:size]
-        # dset.attrs = dset.attrs[:size]
-
-    return dset
+    return dataset
 
 
 def display_random():
@@ -82,3 +83,16 @@ def display_random():
     import matplotlib.pyplot as plt
     for idx, img in enumerate(imgs):
         plt.imsave('{}.png'.format(idx), img)
+
+
+def load_general_dataset(filepath):
+    try:
+        with h5py.File(filepath, 'r') as hf:
+            labels = hf['labels']
+            feats = hf['feats'][:]
+    except Exception as e:
+        hf = loadmat(filepath)
+        labels = np.array(hf['labels']).flatten()
+        feats = hf['feats']
+
+    return feats, labels

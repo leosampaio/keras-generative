@@ -136,3 +136,85 @@ class MobileNetALI(ALI):
 
         return Model([mobile_net.input, z_inputs], xz)
 
+
+class ALIforSVHN(ALI):
+    """
+    Based on the original ALI paper arch. Experiment on SVHN.
+    See Table 4 on the paper for details
+    """
+    def __init__(self, *args, **kwargs):
+        kwargs['name'] = 'ali_for_svhn'
+        super().__init__(*args, **kwargs)
+
+    def build_Gz(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = BasicConvLayer(filters=32, kernel_size=(5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(inputs)
+        x = BasicConvLayer(filters=64, kernel_size=(4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=128, kernel_size=(4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=256, kernel_size=(4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=512, kernel_size=(4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=512, kernel_size=(1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+
+        x = Flatten()(x)
+
+        # the output is an average (mu) and std variation (sigma) 
+        # describing the distribution that better describes the input
+        z_avg = Dense(self.z_dims)(x)
+        z_log_var = Dense(self.z_dims)(x)
+        z_avg = Activation('linear')(z_avg)
+        z_log_var = Activation('linear')(z_log_var)
+
+        return Model(inputs, [z_avg, z_log_var])
+
+    def build_Gx(self):
+        inputs = Input(shape=(self.z_dims,))
+        w = self.input_shape[0] // (2 ** 2)
+        x = Dense(w * w * 512)(inputs)
+        x = BatchNormalization()(x)
+        x = Activation('relu')(x)
+
+        x = Reshape((w, w, 512))(x)
+
+        x = BasicDeconvLayer(filters=256, kernel_size=(4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicDeconvLayer(filters=128, kernel_size=(4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicDeconvLayer(filters=64, kernel_size=(4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicDeconvLayer(filters=32, kernel_size=(4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicDeconvLayer(filters=32, kernel_size=(5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=32, kernel_size=(1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+
+        d = self.input_shape[2]
+        x = BasicConvLayer(filters=d, kernel_size=(1, 1), activation='sigmoid', bnorm=False)(x)
+
+        return Model(inputs, x)
+
+    def build_D(self):
+        x_inputs = Input(shape=self.input_shape)
+
+        x = BasicConvLayer(filters=32, kernel_size=(5, 5), strides=(1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(x_inputs)
+        x = BasicConvLayer(filters=64, kernel_size=(4, 4), strides=(2, 2), bnorm=True, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=128, kernel_size=(4, 4), strides=(1, 1), bnorm=True, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=256, kernel_size=(4, 4), strides=(2, 2), bnorm=True, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(filters=512, kernel_size=(4, 4), strides=(1, 1), bnorm=True, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = Flatten()(x)
+
+        z_inputs = Input(shape=(self.z_dims,))
+        z = Reshape((1, 1, self.z_dims))(z_inputs)
+        z = BasicConvLayer(filters=512, kernel_size=(1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
+        z = BasicConvLayer(filters=512, kernel_size=(1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
+        z = Flatten()(z)
+
+        xz = Concatenate(axis=-1)([x, z])
+
+        xz = Dense(1024)(xz)
+        xz = LeakyReLU(0.01)(xz)
+        xz = Dropout(0.2)(xz)
+
+        xz = Dense(1024)(xz)
+        xz = LeakyReLU(0.01)(xz)
+        xz = Dropout(0.2)(xz)
+
+        xz = Dense(1)(xz)
+        xz = Activation('sigmoid')(xz)
+
+        return Model([x_inputs, z_inputs], xz)

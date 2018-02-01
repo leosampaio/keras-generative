@@ -37,6 +37,10 @@ def download_svhn():
         sys.stdout.flush()
 
 def load_data():
+    """
+    Load and return dataset as tuple (data, label, label_strings)
+    """
+
     if not os.path.exists(outfile):
         download_svhn()
 
@@ -50,9 +54,4 @@ def load_data():
     y_train = keras.utils.to_categorical(y_train)
     y_train = y_train.astype('float32')
 
-    datasets = ConditionalDataset()
-    datasets.images = x_train
-    datasets.attrs = y_train
-    datasets.attr_names = [str(i) for i in range(10)]
-
-    return datasets
+    return x_train, y_train, [str(i) for i in range(10)]

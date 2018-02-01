@@ -5,7 +5,6 @@ from .improvedgan import ImprovedGAN
 from .ebgan import EBGAN
 from .began import BEGAN
 from .ali import ALI
-from .paper_ali import PaperALI
 from .ali_other import *
 from .aae import AAE, BinAAE, AAE2, DrAAE2
 from .hacked import DropoutALI

@@ -58,7 +58,8 @@ def BasicConvLayer(
     strides=(1, 1),
     bnorm=True,
     dropout=0.0,
-    activation='leaky_relu'):
+    activation='leaky_relu',
+    leaky_relu_slope=0.1):
 
     def fun(inputs):
         kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
@@ -75,10 +76,10 @@ def BasicConvLayer(
             x = BatchNormalization()(x)
 
         if activation == 'leaky_relu':
-            x = LeakyReLU(0.1)(x)
+            x = LeakyReLU(leaky_relu_slope)(x)
         elif activation == 'elu':
             x = ELU()(x)
-        else:
+        elif activation is not None:
             x = Activation(activation)(x)
 
         if dropout > 0.0:
@@ -95,7 +96,8 @@ def BasicDeconvLayer(
     strides=(1, 1),
     bnorm=True,
     dropout=0.0,
-    activation='leaky_relu'):
+    activation='leaky_relu',
+    leaky_relu_slope=0.1):
 
     def fun(inputs):
         if dropout > 0.0:
@@ -117,7 +119,7 @@ def BasicDeconvLayer(
             x = BatchNormalization()(x)
 
         if activation == 'leaky_relu':
-            x = LeakyReLU(0.1)(x)
+            x = LeakyReLU(leaky_relu_slope)(x)
         elif activation == 'elu':
             x = ELU()(x)
         else:

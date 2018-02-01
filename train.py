@@ -12,9 +12,9 @@ import matplotlib
 
 matplotlib.use('Agg')
 
-from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE, BinAAE, AAE2, DrAAE2, PaperALI, WiderALI, DeeperALI, \
-    LocallyConnALI, MobileNetALI
-from datasets import load_data, mnist
+from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE, BinAAE, AAE2, DrAAE2, WiderALI, DeeperALI, \
+    LocallyConnALI, MobileNetALI, ALIforSVHN
+from datasets import load_dataset
 from datasets.datasets import load_data
 
 models = {
@@ -24,7 +24,6 @@ models = {
     'ebgan': EBGAN,
     'began': BEGAN,
     'ali': ALI,
-    'paper_ali': PaperALI,
     'wider_ali': WiderALI,
     'deeper_ali': DeeperALI,
     'local_conn_ali': LocallyConnALI,
@@ -39,6 +38,7 @@ models = {
     'aae2': AAE2,
     'draae2': DrAAE2,
     'vdimprovedgan': VeryDeepImprovedGAN,
+    'ali_SVHN': ALIforSVHN,
 }
 
 
@@ -63,17 +63,12 @@ def main():
     # select gpu
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 
-    # Make output direcotiry if not exists
+    # make output directory if not exists
     if not os.path.isdir(args.output):
         os.mkdir(args.output)
 
-    # Load datasets
-    if args.dataset == 'mnist':
-        dataset = mnist.load_data()
-    elif args.dataset == 'svhn':
-        dataset = svhn.load_data()
-    else:
-        dataset = load_data(args.dataset)
+    # load datasets
+    dataset = load_dataset(args.dataset)
 
     # Construct model
     if args.model not in models:
@@ -97,7 +92,7 @@ def main():
     dataset = dataset.images
 
     # Use the same samples for all trainings - useful when resuming training
-    np.random.seed(123)
+    np.random.seed(14)
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
     np.random.seed()
     # Training loop
