@@ -43,7 +43,12 @@ class BaseModel(metaclass=ABCMeta):
         if 'name' not in kwargs:
             raise Exception('Please specify model name!')
 
-        self.name = kwargs['name']
+        if 'run_id' not in kwargs:
+            run_id = 0
+        else:
+            run_id = kwargs['run_id']
+
+        self.name = "{}_r{}".format(kwargs['name'], run_id)
 
         if 'input_shape' not in kwargs:
             raise Exception('Please specify input shape!')
@@ -131,7 +136,7 @@ class BaseModel(metaclass=ABCMeta):
                     # Get batch and train on it
                     x_batch = self.make_batch(dataset, indx)
                     x_batch = BaseModel.add_input_noise(x_batch, e, segment_idx, total_segments, self.input_noise)
-                    losses = self.train_on_batch(x_batch, checkpoint)
+                    losses = self.train_on_batch(x_batch, compute_grad_norms=checkpoint)
 
                     # get current status
                     ratio = 100.0 * (b + bsize + segment_idx * SEGMENT_SIZE) / len(datasets)
@@ -139,6 +144,7 @@ class BaseModel(metaclass=ABCMeta):
 
                     for k in losses.keys():
                         status_string = "{} | {} = {:8.6f}".format(status_string, k, losses[k])
+                        assert not np.isnan(losses[k])
 
                     # compute ETA
                     elapsed_time = time.time() - start_time
@@ -154,10 +160,6 @@ class BaseModel(metaclass=ABCMeta):
                         self.save_losses_hist(out_dir)
                     # Save generated images
                     if checkpoint:
-                        print('Gen gradient norm: {}, Dis gradient norm: {}'.format(losses.get('g_norm'),
-                                                                                    losses.get('d_norm')))
-                        # if losses.get('g_norm') > GRAD_NORM_LIMIT or losses.get('d_norm') > GRAD_NORM_LIMIT:
-                        #     print('Gradient norm exceeded {}. Exiting'.format(GRAD_NORM_LIMIT))
                         outfile = os.path.join(res_out_dir, 'epoch_%04d_batch_%d.png' % (
                             e + 1, segment_idx * SEGMENT_SIZE + b + bsize))
                         self.save_images(samples, outfile)
@@ -208,6 +210,9 @@ class BaseModel(metaclass=ABCMeta):
         if imgs.shape[3] == 1:
             imgs = np.squeeze(imgs, axis=(3,))
 
+        self.save_image_as_plot(imgs, filename)
+
+    def save_image_as_plot(self, imgs, filename):
         fig = plt.figure(figsize=(8, 8))
         grid = gridspec.GridSpec(10, 10, wspace=0.1, hspace=0.1)
         for i in range(100):

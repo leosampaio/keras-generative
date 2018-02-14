@@ -4,6 +4,8 @@ import math
 import argparse
 
 from models.hacked import VeryDcgan, DropoutDcgan, DropoutVae, DropoutALI, DropoutImprovedGAN, VeryDeepImprovedGAN
+from tensorflow.python.client import device_lib
+# print(device_lib.list_local_devices())
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -12,35 +14,8 @@ import matplotlib
 
 matplotlib.use('Agg')
 
-from models import VAE, DCGAN, ImprovedGAN, EBGAN, BEGAN, ALI, AAE, BinAAE, AAE2, DrAAE2, WiderALI, DeeperALI, \
-    LocallyConnALI, MobileNetALI, ALIforSVHN
+from models import models
 from datasets import load_dataset
-from datasets.datasets import load_data
-
-models = {
-    'vae': VAE,
-    'dcgan': DCGAN,
-    'improvedgan': ImprovedGAN,
-    'ebgan': EBGAN,
-    'began': BEGAN,
-    'ali': ALI,
-    'wider_ali': WiderALI,
-    'deeper_ali': DeeperALI,
-    'local_conn_ali': LocallyConnALI,
-    'mobile_ali': MobileNetALI,
-    'vdcgan': VeryDcgan,
-    'drdcgan': DropoutDcgan,
-    'drvae': DropoutVae,
-    'drimprovedgan': DropoutImprovedGAN,
-    'drali': DropoutALI,
-    'aae': AAE,
-    'binaae': BinAAE,
-    'aae2': AAE2,
-    'draae2': DrAAE2,
-    'vdimprovedgan': VeryDeepImprovedGAN,
-    'ali_SVHN': ALIforSVHN,
-}
-
 
 def main():
     # Parsing arguments
@@ -57,6 +32,7 @@ def main():
     parser.add_argument('--label_smoothing', default=0.0, type=float)
     parser.add_argument('--input_noise', default=0.0, type=float)
     parser.add_argument('--swap_prob', default=0.1, type=float)
+    parser.add_argument('--run_id', '-r', default=1, type=int)
 
     args = parser.parse_args()
 
@@ -81,6 +57,7 @@ def main():
         label_smoothing=args.label_smoothing,
         input_noise=args.input_noise,
         swap_prob=args.swap_prob,
+        run_id=args.run_id
     )
 
     if args.testmode:

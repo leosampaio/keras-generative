@@ -7,8 +7,6 @@ import scipy.io
 
 import keras
 
-from .datasets import ConditionalDataset
-
 url = 'http://ufldl.stanford.edu/housenumbers/train_32x32.mat'
 curdir = os.path.abspath(os.path.dirname(__file__))
 outdir = os.path.join(curdir, 'files')

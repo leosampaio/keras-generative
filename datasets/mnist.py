@@ -1,8 +1,6 @@
 import numpy as np
 import keras
 
-from .datasets import ConditionalDataset
-
 def load_data():
     (x_train, y_train), _ = keras.datasets.mnist.load_data()
 

@@ -34,7 +34,7 @@ class MinibatchDiscrimination(Layer):
         assert len(input_shape) == 2
         self.W = self.add_weight(name='kernel',
                                  shape=(input_shape[1], self.kernels * self.dims),
-                                 initializer='uniform',
+                                 initializer='random_normal',
                                  trainable=True)
 
     def call(self, inputs):
@@ -92,7 +92,7 @@ def BasicConvLayer(
 def BasicDeconvLayer(
     filters,
     kernel_size=(5, 5),
-    padding='same',
+    padding='valid',
     strides=(1, 1),
     bnorm=True,
     dropout=0.0,

@@ -1,10 +1,13 @@
 import h5py
 import numpy as np
 
+from . import svhn
+from . import mnist
+
 
 class Dataset(object):
 
-    def __init__(self, name):
+    def __init__(self):
 
         self.images = None
 
@@ -57,10 +60,10 @@ class PairwiseDataset(object):
 
 
 def load_dataset(dataset_name):
-    if args.dataset == 'mnist':
+    if dataset_name == 'mnist':
         dataset = ConditionalDataset()
-        dataset.images, dataset.attrs, dataset.attr_names = = mnist.load_data()
-    elif args.dataset == 'svhn':
+        dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data()
+    elif dataset_name == 'svhn':
         dataset = ConditionalDataset()
         dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data()
     else:
