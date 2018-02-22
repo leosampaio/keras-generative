@@ -29,9 +29,6 @@ def main():
     random.shuffle(dataset.images)
     images = dataset.images[:100]
 
-    images = images * 0.5 + 0.5
-    images = np.clip(images, 0.0, 1.0)
-
     model = models[args.model](
         input_shape=dataset.shape[1:],
         z_dims=args.zdims,
@@ -40,7 +37,6 @@ def main():
 
     model.load_model(args.weights)
     encodings = model.f_Gz.predict(images)
-    encodings = encodings[0]
     reconstructions = model.predict_images(encodings)
     print(reconstructions.shape)
 

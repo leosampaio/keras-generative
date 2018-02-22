@@ -4,7 +4,6 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-
 def set_trainable(model, train):
     """
     Enable or disable training for the model

@@ -13,6 +13,7 @@ from keras.models import load_model
 from abc import ABCMeta, abstractmethod
 
 from .utils import *
+from .notifyier import *
 
 # number of training images to store in memory at once
 # larger datasets are split into segments of this size
@@ -153,6 +154,12 @@ class BaseModel(metaclass=ABCMeta):
                     print(status_string)
                     sys.stdout.flush()
 
+                    # add collapse checking
+                    if losses["g_loss"] == losses["d_loss"]:
+                        send_telegram_message("Generator and Discriminator losses are equal. Possible collapse!")
+                        print("Generator and Discriminator losses are equal. Possible collapse!")
+                        exit()
+
                     if b % (5 * batchsize) == 0:
                         self.g_losses.append(losses['g_loss'])
                         self.d_losses.append(losses['d_loss'])
@@ -164,6 +171,7 @@ class BaseModel(metaclass=ABCMeta):
                             e + 1, segment_idx * SEGMENT_SIZE + b + bsize))
                         self.save_images(samples, outfile)
                         self.save_losses_hist(out_dir)
+                        send_telegram_image(os.path.join(out_dir, 'loss_hist.png'))
 
                     if self.test_mode:
                         print('\nFinish testing: %s' % self.name)
@@ -205,8 +213,8 @@ class BaseModel(metaclass=ABCMeta):
         '''
         Save images generated from random sample numbers
         '''
-        imgs = self.predict(samples) * 0.5 + 0.5
-        imgs = np.clip(imgs, 0.0, 1.0)
+        imgs = self.predict(samples) 
+        # imgs = np.clip(imgs * 0.5 + 0.5, 0.0, 1.0)
         if imgs.shape[3] == 1:
             imgs = np.squeeze(imgs, axis=(3,))
 
@@ -225,6 +233,7 @@ class BaseModel(metaclass=ABCMeta):
             fig.add_subplot(ax)
 
         fig.savefig(filename, dpi=200)
+        send_telegram_image(filename)
         plt.close(fig)
 
     def save_model(self, out_dir, epoch):
@@ -263,15 +272,17 @@ class BaseModel(metaclass=ABCMeta):
         pass
 
     def predict_images(self, z_sample):
-        predictions = self.predict(z_sample) * 0.5 + 0.5
-        images = np.clip(predictions, 0.0, 1.0)
+        images = self.predict(z_sample)
+        if images.shape[3] == 1:
+            images = np.squeeze(imgs, axis=(3,))
+        # images = np.clip(predictions * 0.5 + 0.5, 0.0, 1.0)
         return images
 
     @staticmethod
     def get_labels(batchsize, smoothing=0.0):
         if smoothing > 0.0:
             y_pos = 1. - np.random.random((batchsize, )) * smoothing
-            y_neg = np.random.random((batchsize, )) * smoothing
+            y_neg = np.zeros(batchsize, dtype='float32')#np.random.random((batchsize, )) * smoothing
         else:
             y_pos = np.ones(batchsize, dtype='float32')
             y_neg = np.zeros(batchsize, dtype='float32')

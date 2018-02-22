@@ -3,7 +3,7 @@ from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape, 
     BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
     Lambda)
-from keras.optimizers import Adam, SGD
+from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
 from models import ALI
@@ -14,8 +14,8 @@ from models.utils import set_trainable, zero_loss
 
 def discriminator_lossfun(y_true, y_pred):
     """
-    y_pred[:,0]: p, prediction for pairs (Gx(z), z) # label 1
-    y_pred[:,1]: q, prediction for pairs (x, Gz(z)) # label 0
+    y_pred[:,0]: p, prediction for pairs (Gx(z), z)
+    y_pred[:,1]: q, prediction for pairs (x, Gz(z))
     """
     p = K.clip(y_pred[:,0], K.epsilon(), 1.0 - K.epsilon())
     q = K.clip(y_pred[:,1], K.epsilon(), 1.0 - K.epsilon())
@@ -142,13 +142,13 @@ class ALIforSVHN(ALI):
 
     def build_model(self):
 
-        self.f_Gz = self.build_Gz()
-        self.f_Gx = self.build_Gx()
-        self.f_D = self.build_D()
+        self.f_Gz = self.build_Gz() # Moriarty, the encoder
+        self.f_Gx = self.build_Gx() # Irene, the decoder
+        self.f_D = self.build_D()   # Sherlock, the detective
         self.f_Gz.summary(); self.f_Gx.summary(); self.f_D.summary()
 
-        opt_d = Adam(lr=1e-6, beta_1=0.5, beta_2=10e-3)
-        opt_g = Adam(lr=1e-4, beta_1=0.5, beta_2=10e-3)
+        opt_d = RMSprop(lr=1e-4)
+        opt_g = RMSprop(lr=1e-4)
 
         # build discriminator
         self.dis_trainer = self.build_ALI_trainer()
@@ -180,39 +180,22 @@ class ALIforSVHN(ALI):
         y_pos, y_neg = ALI.get_labels(batchsize, self.label_smoothing)
         y = np.stack((y_neg, y_pos), axis=1)
 
+        # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
 
-        # # indicates the upper for losses of the networks, i.e. a net will be retrained (although at most max_retrains
-        # # times) until the loss is lower than the bound
-        # max_loss = 5.
-        # # also an upper bound but only for the generator network: the ratio of losses gen/dis (generator's loss can only
-        # # be max_g_2_d_loss_ratio times higher than discriminator's loss
-        # max_g_2_d_loss_ratio = 4.5
-        # retrained_times, max_retrains = 0, 5
-        # while True:
-        #     d_loss = self.dis_trainer.train_on_batch([x_data, z_latent_dis], y)
-
-        #     if d_loss < max_loss or retrained_times >= max_retrains:
-        #         break
-        #     retrained_times += 1
-        # if retrained_times > 0:
-        #     print('Retrained Discriminator {} time(s)'.format(retrained_times))
-        # while True:
-        #     g_loss = self.gen_trainer.train_on_batch([x_data, z_latent_dis], y)
-
-        #     if (g_loss < max_loss and g_loss < self.last_d_loss * max_g_2_d_loss_ratio) \
-        #             or retrained_times >= max_retrains:
-        #         break
-        #     retrained_times += 1
-        # if retrained_times > 0:
-        #     print('Retrained Generator {} time(s)'.format(retrained_times))
-
-        # retrained_times = 0
-
+        # train discriminator
         d_loss = self.dis_trainer.train_on_batch([x_data, z_latent_dis], y)
-        g_loss = self.gen_trainer.train_on_batch([x_data, z_latent_dis], y)
-        self.last_d_loss = d_loss
 
+        # train generator, repeat if loss is too high in comparison with D
+        max_loss, max_g_2_d_loss_ratio = 5., 5.
+        retrained_times, max_retrains = 0, 3
+        while (retrained_times < max_retrains or g_loss > max_loss or g_loss > self.last_d_loss * max_g_2_d_loss_ratio):
+            g_loss = self.gen_trainer.train_on_batch([x_data, z_latent_dis], y)
+            retrained_times += 1
+        if retrained_times > 0:
+            print('Retrained Generator {} time(s)'.format(retrained_times))
+
+        self.last_d_loss = d_loss
         losses = {
             'g_loss': g_loss,
             'd_loss': d_loss
