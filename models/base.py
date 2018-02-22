@@ -19,7 +19,6 @@ try:
 except ImportError:
     print("You did not set a notifyier. Notifications will not be sent anywhere")
 
-CHECKPOINT_ITERS = 20000
 
 class BaseModel(metaclass=ABCMeta):
     '''
@@ -58,6 +57,9 @@ class BaseModel(metaclass=ABCMeta):
         self.label_smoothing = kwargs.get('label_smoothing', 0.0)
         self.input_noise = kwargs.get('input_noise', 0.0)
 
+        self.checkpoint_every = kwargs.get('checkpoint_every', 1)
+        self.notify_every = kwargs.get('notify_every', self.checkpoint_every)
+
 
     def main_loop(self, dataset, samples, epochs=100, batchsize=100, reporter=[]):
         '''
@@ -91,9 +93,6 @@ class BaseModel(metaclass=ABCMeta):
                 bsize = min(batchsize, num_data - b)
                 indx = perm[b:b + bsize]
 
-                # every checkpoint iterations save generated images and compute gradient norms
-                checkpoint = (b + bsize) % CHECKPOINT_ITERS == 0 or (b + bsize) == num_data
-
                 # slice batch out of dataset
                 x_batch, y_batch = self.make_batch(dataset, indx)
 
@@ -101,7 +100,7 @@ class BaseModel(metaclass=ABCMeta):
                 x_batch = add_input_noise(x_batch, curr_epoch=e, total_epochs=epochs, start_noise=self.input_noise)
 
                 # finally, train and report status
-                losses = self.train_on_batch(x_batch, y_batch=y_batch, compute_grad_norms=checkpoint)
+                losses = self.train_on_batch(x_batch, y_batch=y_batch)
                 print_current_progress(e, b, bsize, len(dataset), losses, elapsed_time=time.time()-start_time)
 
                 # check for collapse scenario where G and D losses are equal
@@ -111,21 +110,26 @@ class BaseModel(metaclass=ABCMeta):
                     print("Generator and Discriminator losses are equal. Possible collapse!")
                     exit()
 
+                # plot losses every 5 batches
                 if b % (5 * batchsize) == 0:
                     self.g_losses.append(losses['g_loss'])
                     self.d_losses.append(losses['d_loss'])
                     self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
                     self.save_losses_hist(out_dir)
-                if checkpoint:
-                    outfile = os.path.join(res_out_dir, 'epoch_%04d_batch_%d.png' % (
-                        e + 1, b + bsize))
+
+                # plot samples and losses and send notification if it's checkpoint time
+                is_checkpoint = (b + bsize) == num_data and (e % self.checkpoint_every) == 0
+                is_notification_checkpoint = (b + bsize) == num_data and (e % self.notify_every) == 0
+                if is_checkpoint:
+                    outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
                     self.save_images(samples, outfile)
                     self.save_losses_hist(out_dir)
-                    try:
-                        notify_with_image(outfile)
-                        notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
-                    except NameError: 
-                        pass
+                    if is_notification_checkpoint:
+                        try:
+                            notify_with_image(outfile)
+                            notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
+                        except NameError: 
+                            pass
 
                 if self.test_mode:
                     print('\nFinish testing: %s' % self.name)

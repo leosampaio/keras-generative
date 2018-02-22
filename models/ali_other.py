@@ -5,7 +5,6 @@ from keras.layers import Flatten, Dense, Activation, Reshape, BatchNormalization
 from keras.optimizers import Adam
 
 from models import ALI
-from models.ali import DiscriminatorLossLayer, discriminator_accuracy, generator_accuracy, GeneratorLossLayer
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
 from models.utils import set_trainable, zero_loss
 
