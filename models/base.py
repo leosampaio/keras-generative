@@ -105,9 +105,10 @@ class BaseModel(metaclass=ABCMeta):
 
                 # check for collapse scenario where G and D losses are equal
                 if losses["g_loss"] == losses["d_loss"]:
-                    try: notify_with_message("Generator and Discriminator losses are equal. Possible collapse!")
+                    message = "Generator and Discriminator losses are equal. Stopped at Epoch #{}".format(e+1)
+                    try: notify_with_message(message)
                     except NameError: pass
-                    print("Generator and Discriminator losses are equal. Possible collapse!")
+                    print(message)
                     exit()
 
                 # plot losses every 5 batches
@@ -126,6 +127,7 @@ class BaseModel(metaclass=ABCMeta):
                     self.save_losses_hist(out_dir)
                     if is_notification_checkpoint:
                         try:
+                            notify_with_message("Epoch #{:04}".format(e + 1))
                             notify_with_image(outfile)
                             notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
                         except NameError: 
