@@ -66,13 +66,10 @@ def main():
     if args.resume is not None:
         model.load_model(args.resume)
 
-    dataset = dataset.images
-
     # Use the same samples for all trainings - useful when resuming training
     np.random.seed(14)
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
     np.random.seed()
-    # Training loop
     model.main_loop(dataset, samples,
                     epochs=args.epoch,
                     batchsize=args.batchsize,

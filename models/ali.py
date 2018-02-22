@@ -120,7 +120,7 @@ class ALI(BaseModel):
         self.gen_newest_weights = None
         self.dis_newest_weights = None
 
-    def train_on_batch(self, x_real, compute_grad_norms=False):
+    def train_on_batch(self, x_real, y_batch=None, compute_grad_norms=False):
         self.swap_weights()
 
         batchsize = len(x_real)

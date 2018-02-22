@@ -171,7 +171,7 @@ class ALIforSVHN(ALI):
         self.store_to_save('gen_trainer')
 
 
-    def train_on_batch(self, x_data, compute_grad_norms=False):
+    def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
         # self.swap_weights()
 
         batchsize = len(x_data)
@@ -183,13 +183,14 @@ class ALIforSVHN(ALI):
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
 
-        # train discriminator
+        # train both networks
         d_loss = self.dis_trainer.train_on_batch([x_data, z_latent_dis], y)
+        g_loss = self.gen_trainer.train_on_batch([x_data, z_latent_dis], y)
 
-        # train generator, repeat if loss is too high in comparison with D
+        # repeat generator training if loss is too high in comparison with D
         max_loss, max_g_2_d_loss_ratio = 5., 5.
         retrained_times, max_retrains = 0, 3
-        while (retrained_times < max_retrains or g_loss > max_loss or g_loss > self.last_d_loss * max_g_2_d_loss_ratio):
+        while retrained_times < max_retrains and (g_loss > max_loss or g_loss > self.last_d_loss * max_g_2_d_loss_ratio):
             g_loss = self.gen_trainer.train_on_batch([x_data, z_latent_dis], y)
             retrained_times += 1
         if retrained_times > 0:

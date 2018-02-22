@@ -1,6 +1,6 @@
 from keras import backend as K
 from keras.callbacks import Callback
-import os
+import os, sys
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -115,3 +115,39 @@ def get_gradient_norm_func(model):
 
     func = K.function(inputs=input_tensors, outputs=[norm])
     return func
+
+def time_format(t):
+    m, s = divmod(t, 60)
+    m = int(m)
+    s = int(s)
+    if m == 0:
+        return '%d sec' % s
+    else:
+        return '%d min %d sec' % (m, s)
+
+def print_current_progress(current_epoch, current_batch_index, batch_size, dataset_length, losses, elapsed_time):
+    ratio = 100.0 * (current_batch_index + batch_size) / dataset_length
+    status_string = "Epoch #{:04.0f} | {:06.0f} / {:06.0f} ({:6.2f}% )".format(current_epoch + 1, current_batch_index + batch_size, dataset_length, ratio)
+
+    for k, l in losses.items():
+        status_string = "{} | {} = {:8.6f}".format(status_string, k, l)
+        assert not np.isnan(l)
+
+    # compute ETA
+    eta = elapsed_time / (current_batch_index + batch_size) * (dataset_length - (current_batch_index + batch_size))
+    status_string = "{} | ETA: {}".format(status_string, time_format(eta))
+    print(status_string)
+    sys.stdout.flush()
+
+def add_input_noise(x_batch, curr_epoch, total_epochs, start_noise):
+    if start_noise == 0.0:
+        return x_batch
+
+    noise = np.random.normal(size=x_batch.shape)
+
+    noise_factor = curr_epoch / total_epoches
+    if noise_factor < 0.02:
+        return x_batch
+
+    noised_batch = x_batch + noise * noise_factor
+    return noised_batch

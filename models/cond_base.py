@@ -16,11 +16,6 @@ class CondBaseModel(BaseModel):
         self.attr_names = attr_names
         super(CondBaseModel, self).main_loop(datasets, samples, epochs, batchsize, reporter)
 
-    def make_batch(self, datasets, indx):
-        images = datasets.images[indx]
-        attrs = datasets.attrs[indx]
-        return images, attrs
-
     def save_images(self, samples, filename):
         assert self.attr_names is not None
 
