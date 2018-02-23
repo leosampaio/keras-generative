@@ -3,15 +3,12 @@ import sys
 import math
 import argparse
 
-from models.hacked import VeryDcgan, DropoutDcgan, DropoutVae, DropoutALI, DropoutImprovedGAN, VeryDeepImprovedGAN
-from tensorflow.python.client import device_lib
-# print(device_lib.list_local_devices())
+from keras import backend as K
+import numpy as np
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-import numpy as np
 import matplotlib
-
 matplotlib.use('Agg')
 
 from models import models
@@ -31,13 +28,20 @@ def main():
     parser.add_argument('--testmode', action='store_true')
     parser.add_argument('--label_smoothing', default=0.0, type=float)
     parser.add_argument('--input_noise', default=0.0, type=float)
-    parser.add_argument('--swap_prob', default=0.1, type=float)
     parser.add_argument('--run_id', '-r', default=1, type=int)
+    parser.add_argument('--checkpoint_every', default=1, type=int)
+    parser.add_argument('--notify_every', default=1, type=int)
 
     args = parser.parse_args()
 
-    # select gpu
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+    # select gpu and limit resources if applicable
+    if 'tensorflow' == K.backend():
+        import tensorflow as tf
+        from keras.backend.tensorflow_backend import set_session
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        config.gpu_options.visible_device_list = str(args.gpu)
+        set_session(tf.Session(config=config))
 
     # make output directory if not exists
     if not os.path.isdir(args.output):
@@ -56,12 +60,11 @@ def main():
         output=args.output,
         label_smoothing=args.label_smoothing,
         input_noise=args.input_noise,
-        swap_prob=args.swap_prob,
-        run_id=args.run_id
+        run_id=args.run_id,
+        test_mode=args.testmode,
+        checkpoint_every=args.checkpoint_every,
+        notify_every=args.notify_every,
     )
-
-    if args.testmode:
-        model.test_mode = True
 
     if args.resume is not None:
         model.load_model(args.resume)

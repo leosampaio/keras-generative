@@ -49,7 +49,7 @@ class BaseModel(metaclass=ABCMeta):
         else:
             self.output = kwargs['output']
 
-        self.test_mode = True
+        self.test_mode = kwargs.get('test_mode', False)
         self.trainers = {}
         self.last_epoch = 0
         self.dataset = None
@@ -105,7 +105,7 @@ class BaseModel(metaclass=ABCMeta):
 
                 # check for collapse scenario where G and D losses are equal
                 if losses["g_loss"] == losses["d_loss"]:
-                    message = "Generator and Discriminator losses are equal. Stopped at Epoch #{}".format(e+1)
+                    message = "[{}] Generator and Discriminator losses are equal. Stopped at Epoch #{}".format(self.name, e+1)
                     try: notify_with_message(message)
                     except NameError: pass
                     print(message)
@@ -127,7 +127,7 @@ class BaseModel(metaclass=ABCMeta):
                     self.save_losses_hist(out_dir)
                     if is_notification_checkpoint:
                         try:
-                            notify_with_message("Epoch #{:04}".format(e + 1))
+                            notify_with_message("[{}] Epoch #{:04}".format(self.name, e + 1))
                             notify_with_image(outfile)
                             notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
                         except NameError: 

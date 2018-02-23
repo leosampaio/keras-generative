@@ -124,20 +124,21 @@ class ALI(BaseModel, metaclass=ABCMeta):
         self.f_Gz.summary(); self.f_Gx.summary(); self.f_D.summary()
 
         opt_d, opt_g = self.build_optmizers()
+        loss_d, loss_g = self.define_loss_functions()
 
         # build discriminator
         self.dis_trainer = self.build_ALI_trainer()
         set_trainable(self.f_Gz, False)
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
-        self.dis_trainer.compile(optimizer=opt_d, loss=discriminator_lossfun)
+        self.dis_trainer.compile(optimizer=opt_d, loss=loss_d)
 
         # build generators
         self.gen_trainer = self.build_ALI_trainer()
         set_trainable(self.f_Gz, True)
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
-        self.gen_trainer.compile(optimizer=opt_g, loss=generator_lossfun)
+        self.gen_trainer.compile(optimizer=opt_g, loss=loss_g)
 
         self.dis_trainer.summary(); self.gen_trainer.summary()
 
@@ -154,6 +155,9 @@ class ALI(BaseModel, metaclass=ABCMeta):
         del self.trainers['f_D']
         del self.trainers['f_Gz']
         del self.trainers['f_Gx']
+
+    def define_loss_functions(self):
+        return discriminator_lossfun, generator_lossfun
 
     @abstractmethod
     def build_Gz(self):
