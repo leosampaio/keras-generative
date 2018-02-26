@@ -8,7 +8,7 @@ from .ali import ALI
 from .ali_other import *
 from .aae import AAE, BinAAE, AAE2, DrAAE2
 from .hacked import DropoutALI
-from .ali_svhn import ALIforSVHN
+from .ali_svhn import *
 
 # Conditional generative models
 from .cvae import CVAE
@@ -43,4 +43,5 @@ models = {
     'draae2': DrAAE2,
     'vdimprovedgan': VeryDeepImprovedGAN,
     'ali_SVHN': ALIforSVHN,
+    'ali_SVHN_conditional': ConditionalALIforSVHN
 }

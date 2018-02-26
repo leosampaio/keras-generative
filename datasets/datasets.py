@@ -27,7 +27,6 @@ class ConditionalDataset(Dataset):
         self.attrs = None
         self.attr_names = None
 
-
 class PairwiseDataset(object):
 
     def __init__(self, x_data, y_data):

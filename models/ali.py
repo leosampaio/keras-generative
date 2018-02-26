@@ -67,10 +67,16 @@ class ALI(BaseModel, metaclass=ABCMeta):
         self.dis_trainer = None
 
         self.last_d_loss = 10000000
+
+        self.is_conditional = kwargs.get('is_conditional', False)
+        self.auxiliary_classifier = kwargs.get('auxiliary_classifier', False)
+        self.conditional_dims = kwargs.get('conditional_dims', 0)
+        self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
+
         self.build_model()
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
-    
+        
         batchsize = len(x_data)
 
         # perform label smoothing if applicable
@@ -80,15 +86,20 @@ class ALI(BaseModel, metaclass=ABCMeta):
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
 
+        if self.is_conditional:
+            input_data = [x_data, z_latent_dis, y_batch]
+        else:
+            input_data = [x_data, z_latent_dis]
+
         # train both networks
-        d_loss = self.dis_trainer.train_on_batch([x_data, z_latent_dis], y)
-        g_loss = self.gen_trainer.train_on_batch([x_data, z_latent_dis], y)
+        d_loss = self.dis_trainer.train_on_batch(input_data, y)
+        g_loss = self.gen_trainer.train_on_batch(input_data, y)
 
         # repeat generator training if loss is too high in comparison with D
         max_loss, max_g_2_d_loss_ratio = 5., 5.
         retrained_times, max_retrains = 0, 3
         while retrained_times < max_retrains and (g_loss > max_loss or g_loss > self.last_d_loss * max_g_2_d_loss_ratio):
-            g_loss = self.gen_trainer.train_on_batch([x_data, z_latent_dis], y)
+            g_loss = self.gen_trainer.train_on_batch(input_data, y)
             retrained_times += 1
         if retrained_times > 0:
             print('Retrained Generator {} time(s)'.format(retrained_times))
@@ -110,11 +121,18 @@ class ALI(BaseModel, metaclass=ABCMeta):
 
         assert self.f_D is not None
 
-        p = self.f_D([self.f_Gx(input_z), input_z]) # for pairs (Gx(z), z)
-        q = self.f_D([input_x, self.f_Gz(input_x)]) # for pairs (x, Gz(x))
+        if self.is_conditional:
+            input_conditional = Input(shape=(self.conditional_dims, ))
+            p = self.f_D([self.f_Gx([input_z, input_conditional]), input_z, input_conditional])
+            q = self.f_D([input_x, self.f_Gz(input_x), input_conditional])
+            input = [input_x, input_z, input_conditional]
+        else:
+            p = self.f_D([self.f_Gx(input_z), input_z])
+            q = self.f_D([input_x, self.f_Gz(input_x)])
+            input = [input_x, input_z]
 
         concatenated = Concatenate(axis=-1)([p, q])
-        return Model([input_x, input_z], concatenated, name='ali')
+        return Model(input, concatenated, name='ali')
 
     def build_model(self):
 
@@ -158,6 +176,20 @@ class ALI(BaseModel, metaclass=ABCMeta):
 
     def define_loss_functions(self):
         return discriminator_lossfun, generator_lossfun
+
+    def save_images(self, samples, filename, conditionals_for_samples=None):
+        '''
+        Save images generated from random sample numbers
+        '''
+        if self.is_conditional:
+            imgs = self.predict([samples, conditionals_for_samples])
+        else:
+            imgs = self.predict(samples)
+        # imgs = np.clip(imgs * 0.5 + 0.5, 0.0, 1.0)
+        if imgs.shape[3] == 1:
+            imgs = np.squeeze(imgs, axis=(3,))
+
+        self.save_image_as_plot(imgs, filename)
 
     @abstractmethod
     def build_Gz(self):

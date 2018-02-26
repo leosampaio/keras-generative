@@ -5,6 +5,7 @@ import argparse
 
 from keras import backend as K
 import numpy as np
+from sklearn.preprocessing import LabelBinarizer
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
@@ -13,6 +14,7 @@ matplotlib.use('Agg')
 
 from models import models
 from datasets import load_dataset
+
 
 def main():
     # Parsing arguments
@@ -26,11 +28,13 @@ def main():
     parser.add_argument('--gpu', type=int, default=0)
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--testmode', action='store_true')
-    parser.add_argument('--label_smoothing', default=0.0, type=float)
-    parser.add_argument('--input_noise', default=0.0, type=float)
-    parser.add_argument('--run_id', '-r', default=1, type=int)
-    parser.add_argument('--checkpoint_every', default=1, type=int)
-    parser.add_argument('--notify_every', default=1, type=int)
+    parser.add_argument('--conditional', action='store_true')
+    parser.add_argument('--aux-classifier', action='store_true')
+    parser.add_argument('--label-smoothing', default=0.0, type=float)
+    parser.add_argument('--input-noise', default=0.0, type=float)
+    parser.add_argument('--run-id', '-r', default=1, type=int)
+    parser.add_argument('--checkpoint-every', default=1, type=int)
+    parser.add_argument('--notify-every', default=1, type=int)
 
     args = parser.parse_args()
 
@@ -64,16 +68,23 @@ def main():
         test_mode=args.testmode,
         checkpoint_every=args.checkpoint_every,
         notify_every=args.notify_every,
+        aux_classifier=args.aux_classifier,
+        is_conditional=args.conditional,
+        conditional_dims=len(dataset.attr_names)
     )
 
-    if args.resume is not None:
+    if args.resume:
         model.load_model(args.resume)
 
-    # Use the same samples for all trainings - useful when resuming training
+    # generate random samples to evaluate generated results over time
+    # use the same samples for all trainings - useful when resuming training
     np.random.seed(14)
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
+    conditionals_for_samples = np.array([LabelBinarizer().fit_transform(range(0, len(dataset.attr_names)))[i % len(dataset.attr_names)] for i in range(100)])
     np.random.seed()
+
     model.main_loop(dataset, samples,
+                    samples_conditionals=conditionals_for_samples,
                     epochs=args.epoch,
                     batchsize=args.batchsize,
                     reporter=['loss', 'g_loss', 'd_loss', 'g_acc', 'd_acc'])

@@ -32,12 +32,9 @@ class BaseModel(metaclass=ABCMeta):
         if 'name' not in kwargs:
             raise Exception('Please specify model name!')
 
-        if 'run_id' not in kwargs:
-            run_id = 0
-        else:
-            run_id = kwargs['run_id']
+        self.run_id = kwargs.get('run_id', 0)
 
-        self.name = "{}_r{}".format(kwargs['name'], run_id)
+        self.name = "{}_r{}".format(kwargs['name'], self.run_id)
 
         if 'input_shape' not in kwargs:
             raise Exception('Please specify input shape!')
@@ -61,7 +58,7 @@ class BaseModel(metaclass=ABCMeta):
         self.notify_every = kwargs.get('notify_every', self.checkpoint_every)
 
 
-    def main_loop(self, dataset, samples, epochs=100, batchsize=100, reporter=[]):
+    def main_loop(self, dataset, samples, samples_conditionals=None, epochs=100, batchsize=100, reporter=[], ):
         '''
         Main learning loop
         '''
@@ -123,7 +120,7 @@ class BaseModel(metaclass=ABCMeta):
                 is_notification_checkpoint = (b + bsize) == num_data and (e % self.notify_every) == 0
                 if is_checkpoint:
                     outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
-                    self.save_images(samples, outfile)
+                    self.save_images(samples, outfile, conditionals_for_samples=samples_conditionals)
                     self.save_losses_hist(out_dir)
                     if is_notification_checkpoint:
                         try:
@@ -163,7 +160,7 @@ class BaseModel(metaclass=ABCMeta):
         labels = dataset.attrs[indx]
         return data, labels
 
-    def save_images(self, samples, filename):
+    def save_images(self, samples, filename, conditionals_for_samples=None):
         '''
         Save images generated from random sample numbers
         '''
