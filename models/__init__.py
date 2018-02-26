@@ -21,6 +21,9 @@ from .hacked import *
 from .cyclegan import CycleGAN
 from .unit import UNIT
 
+# Cross-domain
+from .triplet_ali import TripletALI
+
 models = {
     'vae': VAE,
     'dcgan': DCGAN,
@@ -43,5 +46,6 @@ models = {
     'draae2': DrAAE2,
     'vdimprovedgan': VeryDeepImprovedGAN,
     'ali_SVHN': ALIforSVHN,
-    'ali_SVHN_conditional': ConditionalALIforSVHN
+    'ali_SVHN_conditional': ConditionalALIforSVHN,
+    'triplet_ali': TripletALI
 }

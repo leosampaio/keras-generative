@@ -57,6 +57,51 @@ class PairwiseDataset(object):
 
     shape = property(_get_shape)
 
+class CrossDomainDatasets(object):
+
+    def __init__(self, anchor_dataset, mirror_dataset):
+        assert len(anchor_dataset.attr_names) == len(mirror_dataset.attr_names)
+        self.anchor = anchor_dataset
+        self.mirror = mirror_dataset
+
+        # speedup future lookups by prepreparing slices
+        self.slices_p_idx = [self.mirror.attrs == m for m in range(len(mirror_dataset.attr_names))]
+        self.slices_n_idx = [self.mirror.attrs != m for m in range(len(mirror_dataset.attr_names))]
+
+    def get_triplets(self, idx):
+        a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
+        p_idx = [self.slices_p[y][np.random.choice(self.slices_p[y].shape[0])] for y in a_y]
+        n_idx = [self.slices_n[y][np.random.choice(self.slices_n[y].shape[0])] for y in a_y]
+        p_x, p_y = self.mirror.images[p_idx], self.mirror.attrs[p_idx]
+        n_x, n_y = self.mirror.images[n_idx], self.mirror.attrs[n_idx]
+
+        return (a_x, p_x, n_x), (a_y, p_y, n_y)
+
+    def get_positive_pairs(self, idx):
+        a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
+        p_idx = [self.slices_p[y][np.random.choice(self.slices_p[y].shape[0])] for y in a_y]
+        p_x, p_y = self.mirror.images[p_idx], self.mirror.attrs[p_idx]
+
+        return (a_x, p_x), (a_y, p_y)
+
+    def get_negative_pairs(self, idx):
+        a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
+        n_idx = [self.slices_n[y][np.random.choice(self.slices_n[y].shape[0])] for y in a_y]
+        n_x, n_y = self.mirror.images[n_idx], self.mirror.attrs[n_idx]
+
+        return (a_x, n_x), (a_y, n_y)
+
+    def __len__(self):
+        return len(self.anchor)
+
+    def _get_shape(self):
+        return self.anchor.shape
+
+    def _get_attr_names(self):
+        return self.anchor.attr_names
+
+    attr_names = property(_get_attr_names)
+    shape = property(_get_shape)
 
 def load_dataset(dataset_name):
     if dataset_name == 'mnist':
@@ -65,6 +110,10 @@ def load_dataset(dataset_name):
     elif dataset_name == 'svhn':
         dataset = ConditionalDataset()
         dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data()
+    elif dataset_name == 'mnist-svhn':
+        anchor = load_dataset('mnist')
+        mirror = load_dataset('svhn')
+        dataset = CrossDomainDatasets(anchor, mirror)
     else:
         dataset = ConditionalDataset()
         dataset.images, dataset.attrs = load_general_dataset(dataset_name)

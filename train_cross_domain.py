@@ -7,6 +7,8 @@ from keras import backend as K
 import numpy as np
 from sklearn.preprocessing import LabelBinarizer
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import matplotlib
 matplotlib.use('Agg')
 
@@ -18,7 +20,7 @@ def main():
     # Parsing arguments
     parser = argparse.ArgumentParser(description='Training GANs or VAEs')
     parser.add_argument('--model', type=str, required=True)
-    parser.add_argument('--datasets', nargs='+', type=str, required=True)
+    parser.add_argument('--dataset', type=str, required=True)
     parser.add_argument('--epoch', type=int, default=200)
     parser.add_argument('--batchsize', type=int, default=50)
     parser.add_argument('--output', default='output')
@@ -49,17 +51,15 @@ def main():
     if not os.path.isdir(args.output):
         os.mkdir(args.output)
 
-    # load datasets (and get general info from first one)
-    datasets = [load_dataset(d) for d in args.datasets]
-    conditional_dims = len(datasets[0].attr_names)
-    input_shape = datasets[0].shape[1:]
+    # load datasets
+    dataset = load_dataset(args.dataset)
 
     # Construct model
     if args.model not in models:
         raise Exception('Unknown model:', args.model)
 
     model = models[args.model](
-        input_shape=input_shape,
+        input_shape=dataset.shape[1:],
         z_dims=args.zdims,
         output=args.output,
         label_smoothing=args.label_smoothing,
@@ -70,20 +70,20 @@ def main():
         notify_every=args.notify_every,
         aux_classifier=args.aux_classifier,
         is_conditional=args.conditional,
-        conditional_dims=conditional_dims
+        conditional_dims=len(dataset.attr_names)
     )
 
     if args.resume:
         model.load_model(args.resume)
 
     # generate random samples to evaluate generated results over time
-    # use the same samples for all training - useful when resuming training
+    # use the same samples for all trainings - useful when resuming training
     np.random.seed(14)
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
-    conditionals_for_samples = np.array([LabelBinarizer().fit_transform(range(0, conditional_dims))[i % conditional_dims] for i in range(100)])
+    conditionals_for_samples = np.array([LabelBinarizer().fit_transform(range(0, len(dataset.attr_names)))[i % len(dataset.attr_names)] for i in range(100)])
     np.random.seed()
 
-    model.main_loop(datasets, samples,
+    model.main_loop(dataset, samples,
                     samples_conditionals=conditionals_for_samples,
                     epochs=args.epoch,
                     batchsize=args.batchsize)
