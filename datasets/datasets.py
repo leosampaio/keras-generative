@@ -65,13 +65,19 @@ class CrossDomainDatasets(object):
         self.mirror = mirror_dataset
 
         # speedup future lookups by prepreparing slices
-        self.slices_p_idx = [self.mirror.attrs == m for m in range(len(mirror_dataset.attr_names))]
-        self.slices_n_idx = [self.mirror.attrs != m for m in range(len(mirror_dataset.attr_names))]
+        labels = self.anchor.attrs
+        ncols = labels.shape[1]
+        dtype = labels.dtype.descr * ncols
+        struct = labels.view(dtype)
+        uniq = np.unique(struct)
+        uniq = uniq.view(labels.dtype).reshape(-1, ncols)
+        self.slices_p = {tuple(m): np.where((self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in uniq}
+        self.slices_n = {tuple(m): np.where(~(self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in uniq}
 
     def get_triplets(self, idx):
         a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
-        p_idx = [self.slices_p[y][np.random.choice(self.slices_p[y].shape[0])] for y in a_y]
-        n_idx = [self.slices_n[y][np.random.choice(self.slices_n[y].shape[0])] for y in a_y]
+        p_idx = [self.slices_p[tuple(y)][np.random.choice(self.slices_p[tuple(y)].shape[0])] for y in a_y]
+        n_idx = [self.slices_n[tuple(y)][np.random.choice(self.slices_n[tuple(y)].shape[0])] for y in a_y]
         p_x, p_y = self.mirror.images[p_idx], self.mirror.attrs[p_idx]
         n_x, n_y = self.mirror.images[n_idx], self.mirror.attrs[n_idx]
 
@@ -107,11 +113,14 @@ def load_dataset(dataset_name):
     if dataset_name == 'mnist':
         dataset = ConditionalDataset()
         dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data()
+    if dataset_name == 'mnist-rgb':
+        dataset = ConditionalDataset()
+        dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data(use_rgb=True)
     elif dataset_name == 'svhn':
         dataset = ConditionalDataset()
         dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data()
     elif dataset_name == 'mnist-svhn':
-        anchor = load_dataset('mnist')
+        anchor = load_dataset('mnist-rgb')
         mirror = load_dataset('svhn')
         dataset = CrossDomainDatasets(anchor, mirror)
     else:

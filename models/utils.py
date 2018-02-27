@@ -8,9 +8,12 @@ def set_trainable(model, train):
     """
     Enable or disable training for the model
     """
-    model.trainable = train
-    for l in model.layers:
-        l.trainable = train
+    if type(model) != list: mlist = [model]
+    else: mlist = model
+    for model in mlist:
+        model.trainable = train
+        for l in model.layers:
+            l.trainable = train
 
 
 def zero_loss(y_true, y_pred):
@@ -151,3 +154,16 @@ def add_input_noise(x_batch, curr_epoch, total_epochs, start_noise):
 
     noised_batch = x_batch + noise * noise_factor
     return noised_batch
+
+def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
+        if smoothing > 0.0:
+            y_pos = 1. - np.random.random((batchsize, )) * smoothing
+            if one_sided_smoothing:
+                y_neg = np.zeros(batchsize, dtype='float32')
+            else:
+                y_neg = np.random.random((batchsize, )) * smoothing
+        else:
+            y_pos = np.ones(batchsize, dtype='float32')
+            y_neg = np.zeros(batchsize, dtype='float32')
+
+        return y_pos, y_neg

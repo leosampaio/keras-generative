@@ -45,7 +45,7 @@ class ALIforSVHN(ALI):
             output_shape=(self.z_dims, )
         )(concatenated)
 
-        return Model(x_input, output, name="Gz")
+        return Model(x_input, output)
 
     def build_Gx(self):
         z_input = Input(shape=(self.z_dims,))
@@ -62,7 +62,7 @@ class ALIforSVHN(ALI):
         x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
-        return Model(z_input, x, name="Gx")
+        return Model(z_input, x)
 
 
     def build_D(self):
@@ -94,7 +94,7 @@ class ALIforSVHN(ALI):
         xz = Dense(1)(xz)
         xz = Activation('sigmoid')(xz)
 
-        return Model([x_input, z_input], xz, name="Discriminator")
+        return Model([x_input, z_input], xz)
 
     def build_optmizers(self):
         opt_d = RMSprop(lr=1e-4)
@@ -127,7 +127,7 @@ class ConditionalALIforSVHN(ALIforSVHN):
         x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
-        return Model([z_input, conditional_input], x, name="Gx")
+        return Model([z_input, conditional_input], x)
 
 
     def build_D(self):
@@ -161,4 +161,4 @@ class ConditionalALIforSVHN(ALIforSVHN):
         xz = Dense(1)(xz)
         xz = Activation('sigmoid')(xz)
 
-        return Model([x_input, z_input, conditional_input], xz, name="Discriminator")
+        return Model([x_input, z_input, conditional_input], xz)
