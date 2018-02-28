@@ -191,6 +191,11 @@ class ALI(BaseModel, metaclass=ABCMeta):
 
         self.save_image_as_plot(imgs, filename)
 
+    def did_collapse(self, losses):
+        if losses["g_loss"] == losses["d_loss"]:
+            return "G and D losses are equal"
+        else: return False
+
     @abstractmethod
     def build_Gz(self):
         pass

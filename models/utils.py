@@ -146,13 +146,16 @@ def add_input_noise(x_batch, curr_epoch, total_epochs, start_noise):
     if start_noise == 0.0:
         return x_batch
 
-    noise = np.random.normal(size=x_batch.shape)
+    if type(x_batch) == tuple: batchsize = x_batch[0].shape
+    else: batchsize = x_batch.shape
+    noise = np.random.normal(size=batchsize)
 
-    noise_factor = curr_epoch / total_epoches
+    noise_factor = curr_epoch / total_epochs
     if noise_factor < 0.02:
         return x_batch
 
-    noised_batch = x_batch + noise * noise_factor
+    if type(x_batch) == tuple: noised_batch = tuple([X + noise * noise_factor for X in x_batch])
+    else: noised_batch = x_batch + noise * noise_factor
     return noised_batch
 
 def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):

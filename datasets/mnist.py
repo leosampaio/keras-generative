@@ -6,6 +6,7 @@ def load_data(use_rgb=False):
 
     x_train = np.pad(x_train, ((0, 0), (2, 2), (2, 2)), 'constant', constant_values=0)
     if use_rgb:
+        x_train = 256 - x_train
         x_train = np.stack((x_train,)*3, -1)
     else:
         x_train = (x_train[:, :, :, np.newaxis])

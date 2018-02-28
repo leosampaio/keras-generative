@@ -33,7 +33,7 @@ def triplet_lossfun_creator(margin=1.):
 
 class TripletALI(BaseModel, metaclass=ABCMeta):
     def __init__(self,
-                 ali_models=['ali_SVHN_conditional', 'ali_SVHN_conditional'],
+                 ali_models=['ali_MNIST', 'ali_SVHN'],
                  *args,
                  **kwargs):
         kwargs['name'] = 'triplet_ali'
@@ -86,16 +86,17 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         d_loss = self.dis_trainer.train_on_batch(input_data, y)
         g_loss = self.gen_trainer.train_on_batch(input_data, y)
 
-        # repeat generator training if loss is too high in comparison with D
-        max_loss, max_g_2_d_loss_ratio = 5., 5.
-        retrained_times, max_retrains = 0, 5
         gen_loss = g_loss[1] + g_loss[2] 
         dis_loss = d_loss[0]
-        while retrained_times < max_retrains and (gen_loss > max_loss or gen_loss > self.last_d_loss * max_g_2_d_loss_ratio):
-            g_loss = self.gen_trainer.train_on_batch(input_data, y)
-            retrained_times += 1
-        if retrained_times > 0:
-            print('Retrained Generator {} time(s)'.format(retrained_times))
+
+        # # repeat generator training if loss is too high in comparison with D
+        # max_loss, max_g_2_d_loss_ratio = 10., 10.
+        # retrained_times, max_retrains = 0, 2
+        # while retrained_times < max_retrains and (gen_loss > max_loss or gen_loss > self.last_d_loss * max_g_2_d_loss_ratio):
+        #     g_loss = self.gen_trainer.train_on_batch(input_data, y)
+        #     retrained_times += 1
+        # if retrained_times > 0:
+        #     print('Retrained Generator {} time(s)'.format(retrained_times))
 
         self.last_d_loss = dis_loss
 
@@ -244,3 +245,12 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         opt_d = RMSprop(lr=1e-4)
         opt_g = RMSprop(lr=1e-4)
         return opt_d, opt_g
+
+    def did_collapse(self, losses):
+        if losses["g_loss"] == losses["d_loss"]:
+            return "G and D losses are equal"
+        elif losses["d1_g_loss"] == losses["d1_d_loss"]:
+            return "Domain 1 G and D losses are equal"
+        elif losses["d2_g_loss"] == losses["d2_d_loss"]:
+            return "Domain 2 G and D losses are equal"
+        else: return False

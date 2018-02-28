@@ -101,8 +101,9 @@ class BaseModel(metaclass=ABCMeta):
                 print_current_progress(e, b, bsize, len(dataset), losses, elapsed_time=time.time()-start_time)
 
                 # check for collapse scenario where G and D losses are equal
-                if losses["g_loss"] == losses["d_loss"]:
-                    message = "[{}] Generator and Discriminator losses are equal. Stopped at Epoch #{}".format(self.name, e+1)
+                did_collapse = self.did_collapse(losses)
+                if did_collapse:
+                    message = "[{}] {}. Stopped at Epoch #{}".format(self.name, did_collapse, e+1)
                     try: notify_with_message(message)
                     except NameError: pass
                     print(message)
@@ -160,6 +161,9 @@ class BaseModel(metaclass=ABCMeta):
         labels = dataset.attrs[indx]
         return data, labels
 
+    def did_collapse(self, losses):
+        return False
+
     def save_images(self, samples, filename, conditionals_for_samples=None):
         '''
         Save images generated from random sample numbers
@@ -200,8 +204,11 @@ class BaseModel(metaclass=ABCMeta):
 
     def load_model(self, folder):
         for k, v in self.trainers.items():
-            filename = os.path.join(folder, '%s.hdf5' % (k))
-            getattr(self, k).load_weights(filename)
+            try:
+                filename = os.path.join(folder, "{}.hdf5".format(k))
+                getattr(self, k).load_weights(filename)
+            except OSError:
+                print("Couldn't load {}. Starting from scratch".format(filename))
 
         # load epoch number
         epoch = int(folder.split('_')[-1].replace('/', ''))
