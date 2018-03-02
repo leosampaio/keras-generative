@@ -246,6 +246,12 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         opt_g = RMSprop(lr=1e-4)
         return opt_d, opt_g
 
+    def predict_images(self, z_sample, domain=1):
+        images = self.predict(z_sample, domain=domain)
+        if images.shape[3] == 1:
+            images = np.squeeze(imgs, axis=(3,))
+        return images
+
     def did_collapse(self, losses):
         if losses["g_loss"] == losses["d_loss"]:
             return "G and D losses are equal"
