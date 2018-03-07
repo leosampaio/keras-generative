@@ -12,6 +12,7 @@ from matplotlib import gridspec
 
 from models import models
 from datasets import load_dataset
+from models.notifyier import *
 
 def main():
     parser = argparse.ArgumentParser(description='Sanity Check: x -> z -> x\'')
@@ -27,7 +28,7 @@ def main():
     dataset = load_dataset(args.dataset)
     random.seed(14)
     random.shuffle(dataset.images)
-    images = dataset.images[:100]
+    images = dataset.images[:50]
 
     model = models[args.model](
         input_shape=dataset.shape[1:],
@@ -38,10 +39,16 @@ def main():
     model.load_model(args.weights)
     encodings = model.f_Gz.predict(images)
     reconstructions = model.predict_images(encodings)
-    print(reconstructions.shape)
 
-    model.save_image_as_plot(images, "output/ali_for_svhn/test.jpg")
-    model.save_image_as_plot(reconstructions, "output/ali_for_svhn/test_rec.jpg")
+    weaved_imgs = np.empty((2*len(images), *images.shape[1:]), dtype=images.dtype)
+    weaved_imgs[0::2] = images
+    weaved_imgs[1::2] = reconstructions
+
+    model.save_image_as_plot(weaved_imgs, "output/tmp.jpg")
+    epoch = int(args.weights.split('_')[-1].replace('/', ''))
+    signature = "{}/epoch{}".format(args.model, epoch)
+    notify_with_message("[{}] ALI Cycle Test".format(signature))
+    notify_with_image("output/tmp.jpg")
 
 if __name__ == '__main__':
     main()

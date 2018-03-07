@@ -10,6 +10,10 @@ from .aae import AAE, BinAAE, AAE2, DrAAE2
 from .hacked import DropoutALI
 from .ali_svhn import *
 from .ali_mnist import *
+from .alice import ALICE
+from .alice_mnist import ALICEforMNIST
+from .alice_svhn import ALICEforSVHN
+from .triplet_alice import TripletALICE
 
 # Conditional generative models
 from .cvae import CVAE
@@ -50,5 +54,8 @@ models = {
     'ali_SVHN_conditional': ConditionalALIforSVHN,
     'ali_MNIST': ALIforMNIST,
     'ali_MNIST_conditional': ConditionalALIforMNIST,
-    'triplet_ali': TripletALI
+    'triplet_ali': TripletALI,
+    'alice_mnist': ALICEforMNIST,
+    'alice_svhn': ALICEforSVHN,
+    'triplet_alice': TripletALICE
 }

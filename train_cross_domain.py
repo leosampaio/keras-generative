@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--checkpoint-every', default=1, type=int)
     parser.add_argument('--notify-every', default=1, type=int)
     parser.add_argument('--triplet-margin', default=1., type=float)
+    parser.add_argument('--triplet-weight', default=1., type=float)
 
     args = parser.parse_args()
 
@@ -72,7 +73,8 @@ def main():
         aux_classifier=args.aux_classifier,
         is_conditional=args.conditional,
         conditional_dims=len(dataset.attr_names),
-        triplet_margin=args.triplet_margin
+        triplet_margin=args.triplet_margin,
+        triplet_weight=args.triplet_weight
     )
 
     if args.resume:
