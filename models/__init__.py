@@ -13,7 +13,6 @@ from .ali_mnist import *
 from .alice import ALICE
 from .alice_mnist import ALICEforMNIST
 from .alice_svhn import ALICEforSVHN
-from .triplet_alice import TripletALICE
 
 # Conditional generative models
 from .cvae import CVAE
@@ -28,6 +27,8 @@ from .unit import UNIT
 
 # Cross-domain
 from .triplet_ali import TripletALI
+from .triplet_alice import TripletALICE
+from .triplet_alice_lcc import TripletALICEwithLCC
 
 models = {
     'vae': VAE,
@@ -57,5 +58,6 @@ models = {
     'triplet_ali': TripletALI,
     'alice_mnist': ALICEforMNIST,
     'alice_svhn': ALICEforSVHN,
-    'triplet_alice': TripletALICE
+    'triplet_alice': TripletALICE,
+    'triplet_alice_lcc': TripletALICEwithLCC,
 }

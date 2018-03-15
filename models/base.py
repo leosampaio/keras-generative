@@ -56,6 +56,7 @@ class BaseModel(metaclass=ABCMeta):
 
         self.checkpoint_every = kwargs.get('checkpoint_every', 1)
         self.notify_every = kwargs.get('notify_every', self.checkpoint_every)
+        self.lr = kwargs.get('lr', 1e-4)
 
 
     def main_loop(self, dataset, samples, samples_conditionals=None, epochs=100, batchsize=100, reporter=[], ):
@@ -111,37 +112,38 @@ class BaseModel(metaclass=ABCMeta):
 
                 # plot losses every 5 batches
                 if b % (5 * batchsize) == 0:
-                    self.g_losses.append(losses['g_loss'])
-                    self.d_losses.append(losses['d_loss'])
-                    self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
-                    self.save_losses_hist(out_dir)
+                    self.save_losses_history(losses)
+                    self.plot_losses_hist(out_dir)
 
                 # plot samples and losses and send notification if it's checkpoint time
                 is_checkpoint = (b + bsize) == num_data and (e % self.checkpoint_every) == 0
                 is_notification_checkpoint = (b + bsize) == num_data and (e % self.notify_every) == 0
+                outfile = None
                 if is_checkpoint:
                     outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
                     self.save_images(samples, outfile, conditionals_for_samples=samples_conditionals)
-                    self.save_losses_hist(out_dir)
-                    if is_notification_checkpoint:
-                        try:
-                            notify_with_message("[{}] Epoch #{:04}".format(self.name, e + 1))
-                            notify_with_image(outfile)
-                            notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
-                        except NameError: 
-                            pass
+                    self.save_model(wgt_out_dir, e + 1)
+                if is_notification_checkpoint:
+                    if not outfile:
+                        outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
+                        self.save_images(samples, outfile, conditionals_for_samples=samples_conditionals)
+                        self.plot_losses_hist(out_dir)
+                    try:
+                        notify_with_message("[{}] Epoch #{:04}".format(self.name, e + 1))
+                        notify_with_image(outfile)
+                        notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
+                    except NameError: 
+                        pass
 
                 if self.test_mode:
                     print('\nFinish testing: %s' % self.name)
                     return
 
             elapsed_time = time.time() - start_time
-            print('Took: {}\n'.format(elapsed_time))
+            print('Took: {}s\n'.format(elapsed_time))
 
-            # Save current weights
-            self.save_model(wgt_out_dir, e + 1)
 
-    def save_losses_hist(self, out_dir):
+    def plot_losses_hist(self, out_dir):
         plt.plot(self.g_losses, label='Gen')
         plt.plot(self.d_losses, label='Dis')
         plt.legend()
@@ -152,6 +154,11 @@ class BaseModel(metaclass=ABCMeta):
         plt.legend()
         plt.savefig(os.path.join(out_dir, 'losses_ratio.png'))
         plt.close()
+
+    def save_losses_history(self, losses):
+        self.g_losses.append(losses['g_loss'])
+        self.d_losses.append(losses['d_loss'])
+        self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
 
     def make_batch(self, dataset, indx):
         '''
@@ -208,6 +215,8 @@ class BaseModel(metaclass=ABCMeta):
                 filename = os.path.join(folder, "{}.hdf5".format(k))
                 getattr(self, k).load_weights(filename)
             except OSError:
+                print("Couldn't load {}. Starting from scratch".format(filename))
+            except ValueError:
                 print("Couldn't load {}. Starting from scratch".format(filename))
 
         # load epoch number

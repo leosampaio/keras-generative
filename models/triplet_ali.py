@@ -20,13 +20,13 @@ from .utils import *
 from .layers import *
 from .ali import generator_lossfun, discriminator_lossfun
 
-def triplet_lossfun_creator(margin=1.):
+def triplet_lossfun_creator(margin=1., zdims=256):
     def triplet_lossfun(_, y_pred):
 
         m = K.constant(margin)
         zero = K.constant(0.)
-        a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
-        return K.maximum(zero, m + K.square(a - p) - K.square(a - n))
+        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        return K.maximum(zero, m + K.sqrt(K.sum(K.square(a - p))) - K.sqrt(K.sum(K.square(a - n))))
 
     return triplet_lossfun
 
@@ -224,7 +224,7 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         super().save_model(out_dir, epoch)
 
     def define_loss_functions(self):
-        return discriminator_lossfun, generator_lossfun, triplet_lossfun_creator(margin=self.triplet_margin)
+        return discriminator_lossfun, generator_lossfun, triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.z_dims)
 
     def save_images(self, samples, filename, conditionals_for_samples=None):
         if self.is_conditional:
