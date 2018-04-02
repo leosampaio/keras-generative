@@ -7,9 +7,9 @@ import numpy as np
 import keras
 from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
+from keras.layers import (Flatten, Dense, Activation, Reshape,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          Lambda)
 from keras.optimizers import Adam, SGD, RMSprop
 from keras import backend as K
 
@@ -20,17 +20,18 @@ from .utils import *
 from .layers import *
 from .alice import generator_lossfun, discriminator_lossfun
 
+
 def discriminator_latent_cycle_lossfun(y_true, y_pred):
     """
     y_pred[:,0]: p, prediction for pairs (z, z)
     y_pred[:,1]: q, prediction for pairs (z, Gz(Gx(Gz(z))))
     """
-    p12 = K.clip(y_pred[:,0], K.epsilon(), 1.0 - K.epsilon())
-    q12 = K.clip(y_pred[:,1], K.epsilon(), 1.0 - K.epsilon())
-    p21 = K.clip(y_pred[:,2], K.epsilon(), 1.0 - K.epsilon())
-    q21 = K.clip(y_pred[:,3], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:,0]
-    q_true = y_true[:,1]
+    p12 = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
+    q12 = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
+    p21 = K.clip(y_pred[:, 2], K.epsilon(), 1.0 - K.epsilon())
+    q21 = K.clip(y_pred[:, 3], K.epsilon(), 1.0 - K.epsilon())
+    p_true = y_true[:, 0]
+    q_true = y_true[:, 1]
 
     q12_error = -K.mean(K.log(K.abs(q_true - q12)))
     p12_error = -K.mean(K.log(K.abs(p12 - p_true)))
@@ -39,17 +40,18 @@ def discriminator_latent_cycle_lossfun(y_true, y_pred):
 
     return q21_error + p21_error + q12_error + p12_error
 
+
 def generator_latent_cycle_lossfun(y_true, y_pred):
     """
     y_pred[:,0]: p, prediction for pairs (z, z)
     y_pred[:,1]: q, prediction for pairs (z, Gz(Gx(Gz(z))))
     """
-    p12 = K.clip(y_pred[:,0], K.epsilon(), 1.0 - K.epsilon())
-    q12 = K.clip(y_pred[:,1], K.epsilon(), 1.0 - K.epsilon())
-    p21 = K.clip(y_pred[:,2], K.epsilon(), 1.0 - K.epsilon())
-    q21 = K.clip(y_pred[:,3], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:,0]
-    q_true = y_true[:,1]
+    p12 = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
+    q12 = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
+    p21 = K.clip(y_pred[:, 2], K.epsilon(), 1.0 - K.epsilon())
+    q21 = K.clip(y_pred[:, 3], K.epsilon(), 1.0 - K.epsilon())
+    p_true = y_true[:, 0]
+    q_true = y_true[:, 1]
 
     q12_error = -K.mean(K.log(K.abs(p_true - q12)))
     p12_error = -K.mean(K.log(K.abs(p12 - q_true)))
@@ -58,23 +60,25 @@ def generator_latent_cycle_lossfun(y_true, y_pred):
 
     return q21_error + p21_error + q12_error + p12_error
 
+
 def triplet_lossfun_creator(margin=1., zdims=256):
     def triplet_lossfun(_, y_pred):
 
         m = K.constant(margin)
         zero = K.constant(0.)
-        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        a, p, n = [y_pred[..., i:i + zdims // 2] for i in range(0, y_pred.shape[-1], zdims)]
         return K.maximum(zero, m + K.sqrt(K.sum(K.square(a - p))) - K.sqrt(K.sum(K.square(a - n))))
 
     return triplet_lossfun
 
 
-class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
+class TripletALICEwithLCCandDS(BaseModel, metaclass=ABCMeta):
+
     def __init__(self,
-                 submodels=['alice_mnist', 'alice_svhn'],
+                 submodels=['alice_ds_mnist', 'alice_ds_svhn'],
                  *args,
                  **kwargs):
-        kwargs['name'] = 'triplet_alice_lcc'
+        kwargs['name'] = 'triplet_alice_lcc_ds'
         super().__init__(*args, **kwargs)
 
         self.alice_d1 = models.models[submodels[0]](*args, **kwargs)
@@ -93,8 +97,6 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
 
         self.f_D_latent_cycle = None
 
-        self.last_d_loss = 10000000
-
         self.z_dims = kwargs.get('z_dims', 128)
         self.is_conditional = kwargs.get('is_conditional', False)
         self.auxiliary_classifier = kwargs.get('auxiliary_classifier', False)
@@ -107,22 +109,21 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         self.triplet_losses = []
 
         self.last_losses = {
-            'g_loss': gen_loss,
-            'd_loss': d_loss[0],
-            'domain1_g_loss': g_loss[1],
-            'domain1_d_loss':d_loss[1],
-            'domain2_g_loss':g_loss[2],
-            'domain2_d_loss':d_loss[2],
-            'lc_d_loss': d_loss[3],
-            'lc_g_loss': g_loss[3],
-            'triplet_loss':g_loss[4],
+            'g_loss': 10.,
+            'd_loss': 10.,
+            'domain1_g_loss': 10.,
+            'domain1_d_loss': 10.,
+            'domain2_g_loss': 10.,
+            'domain2_d_loss': 10.,
+            'lc_d_loss': 10.,
+            'lc_g_loss': 10.,
+            'triplet_loss': 10.,
         }
 
         self.build_model()
 
-
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
-        
+
         a_x, p_x, n_x = x_data
         a_y, p_y, n_y = y_batch
 
@@ -131,7 +132,7 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         # perform label smoothing if applicable
         y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=True)
         y = np.stack((y_neg, y_pos), axis=1)
-        y = [y]*4
+        y = [y] * 4
 
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
@@ -147,24 +148,34 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         if self.last_losses['domain1_d_loss'] < self.dis_loss_control or self.last_losses['domain2_d_loss'] < self.dis_loss_control:
             g_loss = self.gen_trainer.train_on_batch(input_data, y)
 
-        gen_loss = g_loss[1] + g_loss[2] + g_loss[3]
-        dis_loss = d_loss[0]
-
-        self.last_d_loss = dis_loss
-
-        losses = {
-            'g_loss': gen_loss,
+        self.last_losses = {
+            'g_loss': g_loss[1] + g_loss[2] + g_loss[3],
             'd_loss': d_loss[0],
             'domain1_g_loss': g_loss[1],
-            'domain1_d_loss':d_loss[1],
-            'domain2_g_loss':g_loss[2],
-            'domain2_d_loss':d_loss[2],
+            'domain1_d_loss': d_loss[1],
+            'domain2_g_loss': g_loss[2],
+            'domain2_d_loss': d_loss[2],
             'lc_d_loss': d_loss[3],
             'lc_g_loss': g_loss[3],
-            'triplet_loss':g_loss[4],
+            'triplet_loss': g_loss[4],
         }
 
-        return losses
+        # if self.last_losses['lc_d_loss'] > self.last_losses['lc_g_loss']:
+        #     d_loss = self.dis_trainer.train_on_batch(input_data, y4)
+        # if self.last_losses['domain1_d_loss'] < self.dis_loss_control:
+        #     self.last_losses['domain1_g_loss'] = self.alice_d1.gen_trainer.train_on_batch([a_x, z_latent_dis], y)
+        # if self.last_losses['domain2_d_loss'] < self.dis_loss_control:
+        #     self.last_losses['domain2_g_loss'] = self.alice_d2.gen_trainer.train_on_batch([p_x, z_latent_dis], y)
+        # if self.last_losses['domain1_d_loss'] > self.last_losses['domain1_g_loss']:
+        #     self.last_losses['domain1_d_loss'] = self.alice_d1.dis_trainer.train_on_batch([a_x, z_latent_dis], y)
+        # if self.last_losses['domain2_d_loss'] > self.last_losses['domain2_g_loss']:
+        #     self.last_losses['domain2_d_loss'] = self.alice_d2.dis_trainer.train_on_batch([p_x, z_latent_dis], y)
+
+        # self.last_losses = {
+        #     'g_loss': g_loss[1] + g_loss[2] + g_loss[3], 'd_loss': d_loss[0], 'domain1_g_loss': g_loss[1], 'domain1_d_loss': d_loss[1], 'domain2_g_loss': g_loss[2], 'domain2_d_loss': d_loss[2], 'lc_d_loss': d_loss[3], 'lc_g_loss': g_loss[3], 'triplet_loss': g_loss[4],
+        # }
+
+        return self.last_losses
 
     def predict(self, z_samples, domain=1):
         if domain == 1:
@@ -224,10 +235,11 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         d2_q_cycle = self.alice_d2.f_D_cycle([input_p_x, d2_x_reconstructed])
 
         # get reconstructed latent variables for latent cycle consistency
-        latent_cycle_12_p = self.f_D_latent_cycle([d1_z_a_hat, d1_z_a_hat])
-        latent_cycle_12_q = self.f_D_latent_cycle([d1_z_a_hat, self.alice_d2.f_Gz(self.alice_d2.f_Gx(d1_z_a_hat))])
-        latent_cycle_21_p = self.f_D_latent_cycle([d2_z_p_hat, d2_z_p_hat])
-        latent_cycle_21_q = self.f_D_latent_cycle([d2_z_p_hat, self.alice_d1.f_Gz(self.alice_d1.f_Gx(d2_z_p_hat))])
+        slice_g_lambda = Lambda(lambda x: x[:, :self.z_dims // 2], output_shape=(self.z_dims // 2, ))
+        latent_cycle_12_p = self.f_D_latent_cycle([slice_g_lambda(d1_z_a_hat), slice_g_lambda(d1_z_a_hat)])
+        latent_cycle_12_q = self.f_D_latent_cycle([slice_g_lambda(d1_z_a_hat), slice_g_lambda(self.alice_d2.f_Gz(self.alice_d2.f_Gx(d1_z_a_hat)))])
+        latent_cycle_21_p = self.f_D_latent_cycle([slice_g_lambda(d2_z_p_hat), slice_g_lambda(d2_z_p_hat)])
+        latent_cycle_21_q = self.f_D_latent_cycle([slice_g_lambda(d2_z_p_hat), slice_g_lambda(self.alice_d1.f_Gz(self.alice_d1.f_Gx(d2_z_p_hat)))])
 
         # get only encoding for Domain 2 negative samples
         d2_z_n_hat = self.alice_d2.f_Gz(input_n_x)
@@ -237,8 +249,8 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         concatenated_lat_cycle = Concatenate(axis=-1, name="lat_cycle_discriminator")([latent_cycle_12_p, latent_cycle_12_q, latent_cycle_21_p, latent_cycle_21_q])
         concatenated_triplet_enc = Concatenate(axis=-1, name="triplet_encoding")([d1_z_a_hat, d2_z_p_hat, d2_z_n_hat])
         return Model(
-            input, 
-            [concatenated_d1, concatenated_d2, concatenated_lat_cycle, concatenated_triplet_enc], 
+            input,
+            [concatenated_d1, concatenated_d2, concatenated_lat_cycle, concatenated_triplet_enc],
             name='triplet_ali'
         )
 
@@ -254,38 +266,39 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         # build the discriminators trainer
         self.dis_trainer = self.build_trainer()
         set_trainable(
-            [self.alice_d1.f_Gx, self.alice_d1.f_Gz, 
-            self.alice_d2.f_Gx, self.alice_d2.f_Gz], False)
+            [self.alice_d1.f_Gx, self.alice_d1.f_Gz,
+             self.alice_d2.f_Gx, self.alice_d2.f_Gz], False)
         set_trainable([self.alice_d1.f_D, self.alice_d2.f_D,
-            self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle, 
-            self.f_D_latent_cycle], True)
-        self.dis_trainer.compile(optimizer=opt_d, 
-                                loss={
-                                    "d1_discriminator": loss_d,
-                                    "d2_discriminator": loss_d,
-                                    "lat_cycle_discriminator" : discriminator_latent_cycle_lossfun,
-                                    "triplet_encoding": loss_triplet
-                                },
-                                loss_weights=[1., 1., 0.5, 0.])
+                       self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle,
+                       self.f_D_latent_cycle], True)
+        self.dis_trainer.compile(optimizer=opt_d,
+                                 loss={
+                                     "d1_discriminator": loss_d,
+                                     "d2_discriminator": loss_d,
+                                     "lat_cycle_discriminator": discriminator_latent_cycle_lossfun,
+                                     "triplet_encoding": loss_triplet
+                                 },
+                                 loss_weights=[1., 1., 1., 0.])
 
         # build the generators trainer
         self.gen_trainer = self.build_trainer()
         set_trainable(
-            [self.alice_d1.f_Gx, self.alice_d1.f_Gz, 
-            self.alice_d2.f_Gx, self.alice_d2.f_Gz], True)
+            [self.alice_d1.f_Gx, self.alice_d1.f_Gz,
+             self.alice_d2.f_Gx, self.alice_d2.f_Gz], True)
         set_trainable([self.alice_d1.f_D, self.alice_d2.f_D,
-            self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle,
-            self.f_D_latent_cycle], False)
-        self.gen_trainer.compile(optimizer=opt_g, 
-                                loss={
-                                    "d1_discriminator": loss_g,
-                                    "d2_discriminator": loss_g,
-                                    "lat_cycle_discriminator" : generator_latent_cycle_lossfun,
-                                    "triplet_encoding": loss_triplet
-                                },
-                                loss_weights=[1., 1., 0.5, self.triplet_weight])
+                       self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle,
+                       self.f_D_latent_cycle], False)
+        self.gen_trainer.compile(optimizer=opt_g,
+                                 loss={
+                                     "d1_discriminator": loss_g,
+                                     "d2_discriminator": loss_g,
+                                     "lat_cycle_discriminator": generator_latent_cycle_lossfun,
+                                     "triplet_encoding": loss_triplet
+                                 },
+                                 loss_weights=[1., 1., 1., self.triplet_weight])
 
-        self.dis_trainer.summary(); self.gen_trainer.summary()
+        self.dis_trainer.summary()
+        self.gen_trainer.summary()
 
         # Store trainers
         self.store_to_save('dis_trainer')
@@ -299,7 +312,6 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         self.store_to_save('d2_f_Gz')
         self.store_to_save('d2_f_Gx')
         self.store_to_save('f_D_latent_cycle')
-        
 
     def define_loss_functions(self):
         return discriminator_lossfun, generator_lossfun, triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.z_dims)
@@ -311,7 +323,7 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         else:
             d1_imgs = self.alice_d1.f_Gx.predict(samples)
             d2_imgs = self.alice_d2.f_Gx.predict(samples)
-        imgs = np.empty((2*len(samples), *d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
+        imgs = np.empty((2 * len(samples), *d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
         imgs[0::2] = d1_imgs
         imgs[1::2] = d2_imgs
         if imgs.shape[3] == 1:
@@ -320,8 +332,8 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         self.save_image_as_plot(imgs[:len(samples)], filename)
 
     def build_optmizers(self):
-        opt_d = RMSprop(lr=self.lr)
-        opt_g = RMSprop(lr=self.lr)
+        opt_d = Adam(lr=self.lr, clipnorm=5.)
+        opt_g = Adam(lr=self.lr, clipnorm=5.)
         return opt_d, opt_g
 
     def predict_images(self, z_sample, domain=1):
@@ -333,11 +345,10 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
     def did_collapse(self, losses):
         if losses["g_loss"] == losses["d_loss"]:
             return "G and D losses are equal"
-        # elif losses["domain1_g_loss"] == losses["domain1_d_loss"]:
-        #     return "Domain 1 G and D losses are equal"
-        # elif losses["domain2_g_loss"] == losses["domain2_d_loss"]:
-        #     return "Domain 2 G and D losses are equal"
-        else: return False
+        elif losses["domain1_g_loss"] == losses["domain1_d_loss"] and losses["domain2_g_loss"] == losses["domain2_d_loss"]:
+            return "Both Domain's G and D losses are equal"
+        else:
+            return False
 
     def plot_losses_hist(self, out_dir):
         plt.plot(self.g_losses, label='Gen')
@@ -358,27 +369,81 @@ class TripletALICEwithLCC(BaseModel, metaclass=ABCMeta):
         self.triplet_losses.append(losses["triplet_loss"])
         self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
 
+    def load_model(self, folder):
+
+        if self.submodels_weights:
+            self.alice_d1.load_model(self.submodels_weights[0])
+            self.alice_d2.load_model(self.submodels_weights[1])
+            print("Loaded submodels' weights.")
+            return
+
+        for k, v in self.trainers.items():
+            try:
+                filename = os.path.join(folder, "{}.hdf5".format(k))
+                getattr(self, k).load_weights(filename)
+            except OSError:
+                print("Couldn't load {}. Starting from scratch".format(filename))
+            except ValueError:
+                print("Couldn't load {}. Starting from scratch".format(filename))
+
+        # load epoch number
+        epoch = int(folder.split('_')[-1].replace('/', ''))
+        self.last_epoch = epoch
+
+    # def build_d_latent_cycle(self):
+
+    #     z_input = Input(shape=(self.z_dims // 2,))
+    #     z = Reshape((1, 1, self.z_dims // 2))(z_input)
+    #     z = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
+    #     z = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
+    #     z = Flatten()(z)
+
+    #     z_hat_input = Input(shape=(self.z_dims // 2,))
+    #     z_hat = Reshape((1, 1, self.z_dims // 2))(z_hat_input)
+    #     z_hat = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z_hat)
+    #     z_hat = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z_hat)
+    #     z_hat = Flatten()(z_hat)
+
+    #     z_z_hat = Concatenate(axis=-1)([z, z_hat])
+
+    #     z_z_hat = Dense(1024)(z_z_hat)
+    #     z_z_hat = LeakyReLU(0.01)(z_z_hat)
+    #     z_z_hat = Dropout(0.2)(z_z_hat)
+
+    #     z_z_hat = Dense(1024)(z_z_hat)
+    #     z_z_hat = LeakyReLU(0.01)(z_z_hat)
+    #     z_z_hat = Dropout(0.2)(z_z_hat)
+
+    #     z_z_hat = Dense(1)(z_z_hat)
+    #     z_z_hat = Activation('sigmoid')(z_z_hat)
+
+    #     return Model([z_input, z_hat_input], z_z_hat)
+
     def build_d_latent_cycle(self):
 
-        z_input = Input(shape=(self.z_dims,))
-        z = Reshape((1, 1, self.z_dims))(z_input)
-        z = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
-        z = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
+        z_input = Input(shape=(self.z_dims // 2,))
+        z = Reshape((1, 1, self.z_dims // 2))(z_input)
+        res_z = z = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
+        z = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01, residual=res_z)(z)
+        res_z = z = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z)
+        z = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01, residual=res_z)(z)
         z = Flatten()(z)
 
-        z_hat_input = Input(shape=(self.z_dims,))
-        z_hat = Reshape((1, 1, self.z_dims))(z_hat_input)
-        z_hat = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z_hat)
-        z_hat = BasicConvLayer(512, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z_hat)
+        z_hat_input = Input(shape=(self.z_dims // 2,))
+        z_hat = Reshape((1, 1, self.z_dims // 2))(z_hat_input)
+        res_z = z_hat = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z_hat)
+        z_hat = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01, residual=res_z)(z_hat)
+        res_z = z_hat = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01)(z_hat)
+        z_hat = BasicConvLayer(128, (1, 1), bnorm=False, dropout=0.2, activation='leaky_relu', leaky_relu_slope=0.01, residual=res_z)(z_hat)
         z_hat = Flatten()(z_hat)
 
         z_z_hat = Concatenate(axis=-1)([z, z_hat])
 
-        z_z_hat = Dense(1024)(z_z_hat)
+        z_z_hat = Dense(256)(z_z_hat)
         z_z_hat = LeakyReLU(0.01)(z_z_hat)
         z_z_hat = Dropout(0.2)(z_z_hat)
 
-        z_z_hat = Dense(1024)(z_z_hat)
+        z_z_hat = Dense(256)(z_z_hat)
         z_z_hat = LeakyReLU(0.01)(z_z_hat)
         z_z_hat = Dropout(0.2)(z_z_hat)
 

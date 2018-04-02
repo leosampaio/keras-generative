@@ -6,7 +6,7 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
 from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
-from models import ALI
+from models import ALI, ALIforSVHN
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
 from models.utils import set_trainable, zero_loss
 
@@ -144,3 +144,74 @@ class ConditionalALIforMNIST(ALIforMNIST):
         xz = Activation('sigmoid')(xz)
 
         return Model([x_input, z_input, conditional_input], xz)
+
+class ALIforSharedExp(ALI):
+
+    def __init__(self, *args, **kwargs):
+        kwargs['name'] = 'ali_shared_exp'
+        super().__init__(*args, **kwargs)
+
+    def build_Gz(self):
+        x_input = Input(shape=self.input_shape)
+
+        x = BasicConvLayer(64, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_input)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+
+        res_x = x = BasicConvLayer(128, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(128, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+
+        x = Flatten()(x)
+
+        mu = Dense(self.z_dims//2)(x)
+        mu = Activation('linear')(mu)
+        sigma = Dense(self.z_dims//2)(x)
+        sigma = Activation('linear')(sigma)
+
+        # use the generated values to sample random z from the latent space
+        concatenated = Concatenate(axis=-1)([mu, sigma])
+        output = Lambda(
+            function=lambda x: x[:, :self.z_dims//2] + (K.exp(x[:, self.z_dims//2:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims//2:])))),
+            output_shape=(self.z_dims//2, )
+        )(concatenated)
+
+        return Model(x_input, concatenated)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        x = Dense(512)(z_input); x = LeakyReLU(0.01)(x)
+        x = Dense(512)(x); x = LeakyReLU(0.01)(x)
+
+        x = Reshape((4, 4, 32))(x)
+
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(32, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(32, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+
+        x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
+
+        return Model(z_input, x)
+
+    def build_optmizers(self):
+        opt_d = Adam(lr=self.lr, clipnorm=5.)
+        opt_g = Adam(lr=self.lr, clipnorm=5.)
+        return opt_d, opt_g
+
+    build_D = ALIforSVHN.__dict__['build_D']

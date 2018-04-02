@@ -1,8 +1,8 @@
 import keras.backend as K
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
+from keras.layers import (Flatten, Dense, Activation, Reshape,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          Lambda)
 from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
@@ -10,7 +10,9 @@ from models import ALICE
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
 from models.utils import set_trainable, zero_loss
 
+
 class ALICEforSVHN(ALICE):
+
     def __init__(self, *args, **kwargs):
         kwargs['name'] = 'alice_for_svhn'
         super().__init__(*args, **kwargs)
@@ -27,7 +29,7 @@ class ALICEforSVHN(ALICE):
 
         x = Flatten()(x)
 
-        # the output is an average (mu) and std variation (sigma) 
+        # the output is an average (mu) and std variation (sigma)
         # describing the distribution that better describes the input
         mu = Dense(self.z_dims)(x)
         mu = Activation('linear')(mu)
@@ -37,7 +39,7 @@ class ALICEforSVHN(ALICE):
         # use the generated values to sample random z from the latent space
         concatenated = Concatenate(axis=-1)([mu, sigma])
         output = Lambda(
-            function=lambda x: x[:,:self.z_dims] + (K.exp(x[:,self.z_dims:]) * (K.random_normal(shape=K.shape(x[:,self.z_dims:])))),
+            function=lambda x: x[:, :self.z_dims] + (K.exp(x[:, self.z_dims:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims:])))),
             output_shape=(self.z_dims, )
         )(concatenated)
 
@@ -59,7 +61,6 @@ class ALICEforSVHN(ALICE):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model(z_input, x)
-
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)
@@ -130,3 +131,98 @@ class ALICEforSVHN(ALICE):
         opt_d = RMSprop(lr=1e-4)
         opt_g = RMSprop(lr=1e-4)
         return opt_d, opt_g
+
+
+class ALICEwithDSforSVHN(ALICE):
+
+    def __init__(self, *args, **kwargs):
+        kwargs['name'] = 'alice_ds_for_svhn'
+        super().__init__(*args, **kwargs)
+
+    def build_Gz(self):
+        x_input = Input(shape=self.input_shape)
+
+        res_x = x = BasicConvLayer(64, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_input)
+        x = BasicConvLayer(64, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+
+        res_x = x_g = BasicConvLayer(128, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x_g = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_g)
+        res_x = x_g = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_g)
+        x_g = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_g)
+        res_x = x_g = BasicConvLayer(128, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_g)
+
+        res_x = x_d = BasicConvLayer(128, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x_d = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_d)
+        res_x = x_d = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_d)
+        x_d = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_d)
+        res_x = x_d = BasicConvLayer(128, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_d)
+
+        x_g = Flatten()(x_g)
+        x_d = Flatten()(x_d)
+
+        mu_g = Dense(self.z_dims // 2)(x_g)
+        mu_g = Activation('linear')(mu_g)
+        sigma_g = Dense(self.z_dims // 2)(x_g)
+        sigma_g = Activation('linear')(sigma_g)
+
+        mu_d = Dense(self.z_dims // 2)(x_d)
+        mu_d = Activation('linear')(mu_d)
+        sigma_d = Dense(self.z_dims // 2)(x_d)
+        sigma_d = Activation('linear')(sigma_d)
+
+        # use the generated values to sample random z from the latent space
+        concatenated_g = Concatenate(axis=-1)([mu_g, sigma_g])
+        concatenated_d = Concatenate(axis=-1)([mu_d, sigma_d])
+        output_g = Lambda(
+            function=lambda x: x[:, :self.z_dims // 2] + (K.exp(x[:, self.z_dims // 2:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims // 2:])))),
+            output_shape=(self.z_dims // 2, )
+        )(concatenated_g)
+        output_d = Lambda(
+            function=lambda x: x[:, :self.z_dims // 2] + (K.exp(x[:, self.z_dims // 2:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims // 2:])))),
+            output_shape=(self.z_dims // 2, )
+        )(concatenated_d)
+
+        concatenated = Concatenate(axis=-1)([output_g, output_d])
+        return Model(x_input, concatenated)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        x = Dense(64, activation='relu')(z_input)
+        x = Dense(128, activation='relu')(x)
+
+        x = Reshape((4, 4, 8))(x)
+
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(64, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+        res_x = x = BasicDeconvLayer(32, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same')(x)
+        x = BasicDeconvLayer(32, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01, padding='same', residual=res_x)(x)
+
+        x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
+        x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
+
+        return Model(z_input, x)
+
+    build_D = ALICEforSVHN.__dict__['build_D']
+    build_D_cycle = ALICEforSVHN.__dict__['build_D_cycle']
+    build_optmizers = ALICEforSVHN.__dict__['build_optmizers']

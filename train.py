@@ -35,6 +35,8 @@ def main():
     parser.add_argument('--run-id', '-r', default=1, type=int)
     parser.add_argument('--checkpoint-every', default=1, type=int)
     parser.add_argument('--notify-every', default=1, type=int)
+    parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--dis-loss-control', default=1., type=float)
 
     args = parser.parse_args()
 
@@ -70,7 +72,9 @@ def main():
         notify_every=args.notify_every,
         aux_classifier=args.aux_classifier,
         is_conditional=args.conditional,
-        conditional_dims=len(dataset.attr_names)
+        conditional_dims=len(dataset.attr_names),
+        lr=args.lr,
+        dis_loss_control=args.dis_loss_control
     )
 
     if args.resume:

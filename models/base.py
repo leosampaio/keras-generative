@@ -57,6 +57,7 @@ class BaseModel(metaclass=ABCMeta):
         self.checkpoint_every = kwargs.get('checkpoint_every', 1)
         self.notify_every = kwargs.get('notify_every', self.checkpoint_every)
         self.lr = kwargs.get('lr', 1e-4)
+        self.dis_loss_control = kwargs.get('dis_loss_control', 1.0)
 
 
     def main_loop(self, dataset, samples, samples_conditionals=None, epochs=100, batchsize=100, reporter=[], ):
@@ -116,8 +117,8 @@ class BaseModel(metaclass=ABCMeta):
                     self.plot_losses_hist(out_dir)
 
                 # plot samples and losses and send notification if it's checkpoint time
-                is_checkpoint = (b + bsize) == num_data and (e % self.checkpoint_every) == 0
-                is_notification_checkpoint = (b + bsize) == num_data and (e % self.notify_every) == 0
+                is_checkpoint = (b + bsize) == num_data and ((e+1) % self.checkpoint_every) == 0
+                is_notification_checkpoint = (b + bsize) == num_data and ((e+1) % self.notify_every) == 0
                 outfile = None
                 if is_checkpoint:
                     outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))

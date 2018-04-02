@@ -73,6 +73,11 @@ class ALI(BaseModel, metaclass=ABCMeta):
         self.conditional_dims = kwargs.get('conditional_dims', 0)
         self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
 
+        self.last_losses = {
+            'g_loss': 10.,
+            'd_loss': 10.
+        }
+
         self.build_model()
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
@@ -94,15 +99,12 @@ class ALI(BaseModel, metaclass=ABCMeta):
         # train both networks
         d_loss = self.dis_trainer.train_on_batch(input_data, y)
         g_loss = self.gen_trainer.train_on_batch(input_data, y)
-
-        # repeat generator training if loss is too high in comparison with D
-        max_loss, max_g_2_d_loss_ratio = 5., 5.
-        retrained_times, max_retrains = 0, 3
-        while retrained_times < max_retrains and (g_loss > max_loss or g_loss > self.last_d_loss * max_g_2_d_loss_ratio):
+        if self.last_losses['d_loss'] < self.dis_loss_control:
             g_loss = self.gen_trainer.train_on_batch(input_data, y)
-            retrained_times += 1
-        if retrained_times > 0:
-            print('Retrained Generator {} time(s)'.format(retrained_times))
+        if self.last_losses['d_loss'] < self.dis_loss_control*1e-5:
+            for i in range(0, 5):
+                g_loss = self.gen_trainer.train_on_batch(input_data, y)
+
 
         self.last_d_loss = d_loss
         losses = {
@@ -110,6 +112,7 @@ class ALI(BaseModel, metaclass=ABCMeta):
             'd_loss': d_loss
         }
 
+        self.last_losses = losses
         return losses
 
     def predict(self, z_samples):

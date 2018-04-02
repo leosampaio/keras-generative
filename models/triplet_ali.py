@@ -33,14 +33,14 @@ def triplet_lossfun_creator(margin=1., zdims=256):
 
 class TripletALI(BaseModel, metaclass=ABCMeta):
     def __init__(self,
-                 ali_models=['ali_MNIST', 'ali_SVHN'],
+                 submodels=['ali_MNIST', 'ali_SVHN'],
                  *args,
                  **kwargs):
         kwargs['name'] = 'triplet_ali'
         super().__init__(*args, **kwargs)
 
-        self.ali_d1 = models.models[ali_models[0]](*args, **kwargs)
-        self.ali_d2 = models.models[ali_models[1]](*args, **kwargs)
+        self.ali_d1 = models.models[submodels[0]](*args, **kwargs)
+        self.ali_d2 = models.models[submodels[1]](*args, **kwargs)
 
         # create local references to ease model saving and loading
         self.d1_f_D = self.ali_d1.f_D

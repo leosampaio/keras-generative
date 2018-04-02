@@ -33,14 +33,14 @@ def triplet_lossfun_creator(margin=1., zdims=256):
 
 class TripletALICE(BaseModel, metaclass=ABCMeta):
     def __init__(self,
-                 ali_models=['alice_mnist', 'alice_svhn'],
+                 submodels=['alice_mnist', 'alice_svhn'],
                  *args,
                  **kwargs):
         kwargs['name'] = 'triplet_alice'
         super().__init__(*args, **kwargs)
 
-        self.alice_d1 = models.models[ali_models[0]](*args, **kwargs)
-        self.alice_d2 = models.models[ali_models[1]](*args, **kwargs)
+        self.alice_d1 = models.models[submodels[0]](*args, **kwargs)
+        self.alice_d2 = models.models[submodels[1]](*args, **kwargs)
 
         # create local references to ease model saving and loading
         self.d1_f_D = self.alice_d1.f_D
@@ -62,6 +62,7 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
         self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
         self.triplet_margin = kwargs.get('triplet_margin', 1.0)
         self.triplet_weight = kwargs.get('triplet_weight', 1.0)
+        self.submodels_weights = kwargs.get('submodels_weights', None)
 
         self.triplet_losses = []
         self.recompiled = False

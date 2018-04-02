@@ -1,5 +1,6 @@
 import h5py
 import numpy as np
+import itertools
 
 from . import svhn
 from . import mnist
@@ -63,6 +64,7 @@ class CrossDomainDatasets(object):
         assert len(anchor_dataset.attr_names) == len(mirror_dataset.attr_names)
         self.anchor = anchor_dataset
         self.mirror = mirror_dataset
+        self.counter = itertools.count(0)
 
         # speedup future lookups by prepreparing slices
         labels = self.anchor.attrs
@@ -70,32 +72,41 @@ class CrossDomainDatasets(object):
         dtype = labels.dtype.descr * ncols
         struct = labels.view(dtype)
         uniq = np.unique(struct)
-        uniq = uniq.view(labels.dtype).reshape(-1, ncols)
-        self.slices_p = {tuple(m): np.where((self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in uniq}
-        self.slices_n = {tuple(m): np.where(~(self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in uniq}
-
+        self.uniq_y = uniq.view(labels.dtype).reshape(-1, ncols)
+        self.slices_p = {tuple(m): np.where((self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in self.uniq_y}
+        self.slices_n = {tuple(m): np.where(~(self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in self.uniq_y}
+        self.shuffle_p_n_samples()
+        
     def get_triplets(self, idx):
         a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
-        p_idx = [self.slices_p[tuple(y)][np.random.choice(self.slices_p[tuple(y)].shape[0])] for y in a_y]
-        n_idx = [self.slices_n[tuple(y)][np.random.choice(self.slices_n[tuple(y)].shape[0])] for y in a_y]
+        p_idx = [self.slices_p[tuple(y)][self.slices_p_perm[tuple(y)][next(self.counter) % len(self.slices_p_perm[tuple(y)])]] for y in a_y]
+        n_idx = [self.slices_n[tuple(y)][self.slices_n_perm[tuple(y)][next(self.counter) % len(self.slices_n_perm[tuple(y)])]] for y in a_y]
         p_x, p_y = self.mirror.images[p_idx], self.mirror.attrs[p_idx]
         n_x, n_y = self.mirror.images[n_idx], self.mirror.attrs[n_idx]
+
+        if next(self.counter) > 2*len(self.mirror):
+            self.shuffle_p_n_samples()
 
         return (a_x, p_x, n_x), (a_y, p_y, n_y)
 
     def get_positive_pairs(self, idx):
         a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
-        p_idx = [self.slices_p[y][np.random.choice(self.slices_p[y].shape[0])] for y in a_y]
+        p_idx = [self.slices_p[tuple(y)][self.slices_p_perm[tuple(y)][next(self.counter) % len(self.slices_p_perm[tuple(y)])]] for y in a_y]
         p_x, p_y = self.mirror.images[p_idx], self.mirror.attrs[p_idx]
 
         return (a_x, p_x), (a_y, p_y)
 
     def get_negative_pairs(self, idx):
         a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
-        n_idx = [self.slices_n[y][np.random.choice(self.slices_n[y].shape[0])] for y in a_y]
+        n_idx = [self.slices_n[tuple(y)][self.slices_n_perm[tuple(y)][next(self.counter) % len(self.slices_n_perm[tuple(y)])]] for y in a_y]
         n_x, n_y = self.mirror.images[n_idx], self.mirror.attrs[n_idx]
 
         return (a_x, n_x), (a_y, n_y)
+
+    def shuffle_p_n_samples(self):
+        self.slices_p_perm = {tuple(y): np.random.permutation(np.arange(self.slices_p[tuple(y)].shape[0])) for y in self.uniq_y}
+        self.slices_n_perm = {tuple(y): np.random.permutation(np.arange(self.slices_n[tuple(y)].shape[0])) for y in self.uniq_y}
+
 
     def __len__(self):
         return len(self.anchor)

@@ -38,6 +38,12 @@ def main():
     parser.add_argument('--triplet-margin', default=1., type=float)
     parser.add_argument('--triplet-weight', default=1., type=float)
     parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--submodels', nargs=2,
+                        help="Submodels used to build the bigger one",
+                        required=True)
+    parser.add_argument('--resume-submodels', nargs=2,
+                        help="Submodels pretrained weights")
+    parser.add_argument('--dis-loss-control', default=1., type=float)
 
     args = parser.parse_args()
 
@@ -76,17 +82,23 @@ def main():
         conditional_dims=len(dataset.attr_names),
         triplet_margin=args.triplet_margin,
         triplet_weight=args.triplet_weight,
-        lr=args.lr
+        lr=args.lr,
+        submodels=args.submodels,
+        dis_loss_control=args.dis_loss_control,
+        submodels_weights=args.resume_submodels
     )
 
-    if args.resume:
+    if args.resume or args.resume_submodels:
         model.load_model(args.resume)
 
     # generate random samples to evaluate generated results over time
     # use the same samples for all trainings - useful when resuming training
     np.random.seed(14)
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
-    conditionals_for_samples = np.array([LabelBinarizer().fit_transform(range(0, len(dataset.attr_names)))[i % len(dataset.attr_names)] for i in range(100)])
+    conditionals_for_samples = np.array(
+        [LabelBinarizer().fit_transform(
+            range(0, len(dataset.attr_names)))
+         [i % len(dataset.attr_names)] for i in range(100)])
     np.random.seed()
 
     model.main_loop(dataset, samples,

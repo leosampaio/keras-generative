@@ -88,6 +88,11 @@ class ALICE(BaseModel, metaclass=ABCMeta):
         self.conditional_dims = kwargs.get('conditional_dims', 0)
         self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
 
+        self.last_losses = {
+            'g_loss': 10.,
+            'd_loss': 10.
+        }
+
         self.build_model()
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
@@ -110,6 +115,12 @@ class ALICE(BaseModel, metaclass=ABCMeta):
         # train both networks
         d_loss = self.dis_trainer.train_on_batch(input_data, y)
         g_loss = self.gen_trainer.train_on_batch(input_data, y)
+        if self.last_losses['d_loss'] < self.dis_loss_control:
+            g_loss = self.gen_trainer.train_on_batch(input_data, y)
+        if self.last_losses['d_loss'] < self.dis_loss_control*1e-5:
+            for i in range(0, 5):
+                g_loss = self.gen_trainer.train_on_batch(input_data, y)
+
 
         self.last_d_loss = d_loss
         losses = {
@@ -117,6 +128,7 @@ class ALICE(BaseModel, metaclass=ABCMeta):
             'd_loss': d_loss
         }
 
+        self.last_losses = losses
         return losses
 
     def predict(self, z_samples):
