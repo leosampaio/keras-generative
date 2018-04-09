@@ -10,9 +10,9 @@ from .aae import AAE, BinAAE, AAE2, DrAAE2
 from .hacked import DropoutALI
 from .ali_svhn import *
 from .ali_mnist import *
-from .alice import ALICE
+from .alice import ALICE, ExplicitALICE
 from .alice_svhn import ALICEforSVHN, ALICEwithDSforSVHN
-from .alice_mnist import ALICEforMNIST, ALICEwithDSforMNIST, ALICEforSharedExp
+from .alice_mnist import ALICEforMNIST, ALICEwithDSforMNIST, ALICEforSharedExp, ExplicitALICEforSharedExp
 
 # Conditional generative models
 from .cvae import CVAE
@@ -31,6 +31,7 @@ from .triplet_alice import TripletALICE
 from .triplet_alice_lcc import TripletALICEwithLCC
 from .triplet_alice_lcc_ds import TripletALICEwithLCCandDS
 from .triplet_alice_elcc_ds import TripletALICEwithExplicitLCCandDS
+from .triplet_ealice_elcc_ds import TripletExplicitALICEwithExplicitLCCandDS
 
 models = {
     'vae': VAE,
@@ -60,6 +61,7 @@ models = {
     'ali_shared_exp': ALIforSharedExp,
     'triplet_ali': TripletALI,
     'alice_shared_exp': ALICEforSharedExp,
+    'ealice_shared': ExplicitALICEforSharedExp,
     'alice_mnist': ALICEforMNIST,
     'alice_svhn': ALICEforSVHN,
     'alice_ds_mnist': ALICEwithDSforMNIST,
@@ -68,4 +70,5 @@ models = {
     'triplet_alice_lcc': TripletALICEwithLCC,
     'triplet_alice_lcc_ds': TripletALICEwithLCCandDS,
     'triplet_alice_elcc_ds': TripletALICEwithExplicitLCCandDS,
+    'triplet_ealice_elcc_ds': TripletExplicitALICEwithExplicitLCCandDS,
 }
