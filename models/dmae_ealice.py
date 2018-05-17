@@ -12,6 +12,7 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
                           Lambda)
 from keras.optimizers import Adam, SGD, RMSprop
 from keras import backend as K
+import tensorflow as tf
 
 from .base import BaseModel
 import models
@@ -21,19 +22,34 @@ from .layers import *
 from .alice import generator_lossfun, discriminator_lossfun, simple_generator_lossfun, simple_discriminator_lossfun
 from .triplet_alice_lcc_ds import TripletALICEwithLCCandDS, triplet_lossfun_creator
 
-def latent_cycle_mae_loss(y_true, y_pred):
+def dmae_pi_loss(y_true, y_pred):
+    """
+        min_PI ||(K.PI)^t - (L.PI^t)||2 
+    """
 
-    a, b = y_pred[..., :y_pred.shape[-1]//2], y_pred[..., (y_pred.shape[-1]//2):] 
-    return K.mean(K.abs(a - b), axis=-1)
+    K_PI, L_PI_t = y_pred[..., 0], y_pred[..., 1]
+    return K.sum(K.square(K.transpose(K_PI) - L_PI_t))
 
-class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
+def dmae_theta_loss(y_true, y_pred):
+    """
+        min_PI trace(K.PI.L.PI^t)
+    """
+
+    K_PI, L_PI_t = y_pred[..., 0], y_pred[..., 1]
+    return -tf.trace(K.dot(K_PI, L_PI_t))
+
+class DMAEwithExplicitALICE(BaseModel, metaclass=ABCMeta):
 
     def __init__(self,
                  submodels=['ealice_shared', 'ealice_shared'],
+                 permutation_matrix_shape=None,
                  *args,
                  **kwargs):
-        kwargs['name'] = 'triplet_ealice_elcc_ds'
+        kwargs['name'] = 'dmae_ealice'
         super().__init__(*args, **kwargs)
+
+        assert permutation_matrix_shape is not None
+        self.permutation_matrix_shape = permutation_matrix_shape
 
         self.alice_d1 = models.models[submodels[0]](*args, **kwargs)
         self.alice_d2 = models.models[submodels[1]](*args, **kwargs)
@@ -48,15 +64,7 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
         self.d2_f_Gx = self.alice_d2.f_Gx
 
         self.z_dims = kwargs.get('z_dims', 128)
-        self.is_conditional = kwargs.get('is_conditional', False)
-        self.auxiliary_classifier = kwargs.get('auxiliary_classifier', False)
-        self.conditional_dims = kwargs.get('conditional_dims', 0)
-        self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
-        self.triplet_margin = kwargs.get('triplet_margin', 1.0)
-        self.triplet_weight = kwargs.get('triplet_weight', 1.0)
         self.submodels_weights = kwargs.get('submodels_weights', None)
-
-        self.triplet_losses = []
 
         self.last_losses = {
             'g_loss': 10.,
@@ -65,17 +73,18 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
             'domain1_d_loss': 10.,
             'domain2_g_loss': 10.,
             'domain2_d_loss': 10.,
-            'lc12_loss': 10.,
-            'lc21_loss': 10.,
-            'triplet_loss': 10.,
+            'dmae_theta_loss': 10.,
+            'dmae_pi_loss': 10.,
         }
+
+        self.dmae_losses = []
 
         self.build_model()
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
 
-        a_x, p_x, n_x = x_data
-        a_y, p_y, n_y = y_batch
+        a_x, b_x = x_data
+        a_y, b_y = y_batch
 
         batchsize = len(a_x)
 
@@ -86,13 +95,15 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
 
-        input_data = [a_x, p_x, n_x, z_latent_dis]
+        input_data = [a_x, b_x, a_y, b_y, z_latent_dis]
+        input_labels = [y, a_x, y, b_x, y]
 
         # train both networks
-        d_loss = self.dis_trainer.train_on_batch(input_data, [y, a_x, y, p_x, y, y, y])
-        g_loss = self.gen_trainer.train_on_batch(input_data, [y, a_x, y, p_x, y, y, y])
+        d_loss = self.dis_trainer.train_on_batch(input_data, input_labels)
+        g_loss = self.gen_trainer.train_on_batch(input_data, input_labels)
+        dmae_loss = self.dmae_trainer.train_on_batch([a_x, b_x, a_y, b_y], y)
         if self.last_losses['domain1_d_loss'] < self.dis_loss_control or self.last_losses['domain2_d_loss'] < self.dis_loss_control:
-            g_loss = self.gen_trainer.train_on_batch(input_data, [y, a_x, y, p_x, y, y, y])
+            g_loss = self.gen_trainer.train_on_batch(input_data, input_labels)
 
         self.last_losses = {
             'g_loss': g_loss[1] + g_loss[3],
@@ -103,9 +114,8 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
             'domain2_g_loss': g_loss[3],
             'domain2_d_loss': d_loss[3],
             'domain2_c_loss': g_loss[4],
-            'lc12_loss': g_loss[5],
-            'lc21_loss': g_loss[6],
-            'triplet_loss': g_loss[7],
+            'dmae_theta_loss': g_loss[5],
+            'dmae_pi_loss': dmae_loss
         }
 
         return self.last_losses
@@ -113,12 +123,13 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
     def build_trainer(self):
 
         input_a_x = Input(shape=self.input_shape)
-        input_p_x = Input(shape=self.input_shape)
-        input_n_x = Input(shape=self.input_shape)
+        input_b_x = Input(shape=self.input_shape)
+        input_a_i = Input(shape=(1,), dtype='int64')
+        input_b_i = Input(shape=(1,), dtype='int64')
         input_z = Input(shape=(self.z_dims, ))
 
         d1_z_hat = self.alice_d1.f_Gz(input_a_x)
-        d2_z_hat = self.alice_d2.f_Gz(input_p_x)        
+        d2_z_hat = self.alice_d2.f_Gz(input_b_x)
 
         # build ALICE for Domain 1 (anchor)
         d1_x_hat = self.alice_d1.f_Gx(input_z)
@@ -130,39 +141,69 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
         d2_x_hat = self.alice_d2.f_Gx(input_z)
         d2_x_reconstructed = Activation('linear', name='d2_cycled')(self.alice_d2.f_Gx(d2_z_hat))
         d2_p = self.alice_d2.f_D([d2_x_hat, input_z])
-        d2_q = self.alice_d2.f_D([input_p_x, d2_z_hat])
-
-        input = [input_a_x, input_p_x, input_n_x, input_z]
-
-        # get reconstructed latent variables for latent cycle consistency
-        slice_g_lambda = Lambda(lambda x: x[:, :self.z_dims // 2], output_shape=(self.z_dims // 2, ))
-        latent_cycle_12 = slice_g_lambda(self.alice_d2.f_Gz(self.alice_d2.f_Gx(d1_z_hat)))
-        latent_cycle_21 = slice_g_lambda(self.alice_d1.f_Gz(self.alice_d1.f_Gx(d2_z_hat)))
-        sliced_d1_z_hat = slice_g_lambda(d1_z_hat)
-        sliced_d2_z_hat = slice_g_lambda(d2_z_hat)
-
-        # get only encoding for Domain 2 negative samples
-        d2_z_n_hat = self.alice_d2.f_Gz(input_n_x)
+        d2_q = self.alice_d2.f_D([input_b_x, d2_z_hat])
 
         concatenated_d1 = Concatenate(axis=-1, name="d1_discriminator")([d1_p, d1_q])
         concatenated_d2 = Concatenate(axis=-1, name="d2_discriminator")([d2_p, d2_q])
-        concatenated_lat_cycle_12 = Concatenate(axis=-1, name="lat_cycle_12")([latent_cycle_12, sliced_d1_z_hat])
-        concatenated_lat_cycle_21 = Concatenate(axis=-1, name="lat_cycle_21")([latent_cycle_21, sliced_d2_z_hat])
-        concatenated_triplet_enc = Concatenate(axis=-1, name="triplet_encoding")([d1_z_hat, d2_z_hat, d2_z_n_hat])
+
+        Kgram = GramMatrixLayer()(d1_z_hat)
+        Lgram = GramMatrixLayer()(d2_z_hat)
+        K_PI, L_PI_t = self.permutation_matrix([Kgram, Lgram, input_a_i, input_b_i])
+        exp_dim_layer = Lambda(lambda x: K.expand_dims(x))
+        concatenated_dmae_matrices = Concatenate(axis=-1, name="dmae_matrices")([exp_dim_layer(K_PI), exp_dim_layer(L_PI_t)])
+
+        input_data = [input_a_x, input_b_x, input_a_i, input_b_i, input_z]
+        output_data = [concatenated_d1, d1_x_reconstructed, concatenated_d2, d2_x_reconstructed, concatenated_dmae_matrices]
+
         return Model(
-            input,
-            [concatenated_d1, d1_x_reconstructed, concatenated_d2, d2_x_reconstructed, concatenated_lat_cycle_12, concatenated_lat_cycle_21, concatenated_triplet_enc],
-            name='triplet_ali'
+            input_data,
+            output_data,
+            name='dmae'
+        )
+
+    def build_dmae_trainer(self):
+
+        input_a_x = Input(shape=self.input_shape)
+        input_b_x = Input(shape=self.input_shape)
+        input_a_i = Input(shape=(1,), dtype='int64')
+        input_b_i = Input(shape=(1,), dtype='int64')
+        n, m = self.permutation_matrix_shape
+
+        d1_z_hat = self.alice_d1.f_Gz(input_a_x)
+        d2_z_hat = self.alice_d2.f_Gz(input_b_x)
+
+        # DMAE permutation matrix PI
+        self.permutation_matrix = PermutationMatrixPiLayer(n, m, restriction_weight=1.0)
+        Kgram = GramMatrixLayer()(d1_z_hat)
+        Lgram = GramMatrixLayer()(d2_z_hat)
+        K_PI, L_PI_t = self.permutation_matrix([Kgram, Lgram, input_a_i, input_b_i])
+        exp_dim_layer = Lambda(lambda x: K.expand_dims(x))
+        concatenated_dmae_matrices = Concatenate(axis=-1, name="dmae_matrices")([exp_dim_layer(K_PI), exp_dim_layer(L_PI_t)])
+
+        return Model(
+            [input_a_x, input_b_x, input_a_i, input_b_i],
+            concatenated_dmae_matrices,
+            name='dmae'
         )
 
     def build_model(self):
 
         # get loss functions and optmizers
-        loss_d, loss_g, loss_triplet = self.define_loss_functions()
+        loss_d, loss_g = self.define_loss_functions()
         opt_d, opt_g = self.build_optmizers()
+
+        # build the DMAE trainer (PI matrix optmizer)
+        self.dmae_trainer = self.build_dmae_trainer()
+        self.permutation_matrix.trainable = True
+        set_trainable([self.alice_d1.f_Gx, self.alice_d1.f_Gz,
+                       self.alice_d2.f_Gx, self.alice_d2.f_Gz,
+                       self.alice_d1.f_D, self.alice_d2.f_D], False)
+        self.dmae_trainer.compile(optimizer=opt_g,
+                                  loss=dmae_pi_loss)
 
         # build the discriminators trainer
         self.dis_trainer = self.build_trainer()
+        self.permutation_matrix.trainable = False
         set_trainable(
             [self.alice_d1.f_Gx, self.alice_d1.f_Gz,
              self.alice_d2.f_Gx, self.alice_d2.f_Gz], False)
@@ -173,14 +214,13 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
                                      "d1_cycled": "mae",
                                      "d2_discriminator": loss_d,
                                      "d2_cycled": "mae",
-                                     "lat_cycle_12": latent_cycle_mae_loss,
-                                     "lat_cycle_21": latent_cycle_mae_loss,
-                                     "triplet_encoding": loss_triplet
+                                     "dmae_matrices": dmae_theta_loss
                                  },
-                                 loss_weights=[1., 0., 1., 0., 0., 0., 0.])
+                                 loss_weights=[1., 0., 1., 0., 0.])
 
         # build the generators trainer
         self.gen_trainer = self.build_trainer()
+        self.permutation_matrix.trainable = True
         set_trainable(
             [self.alice_d1.f_Gx, self.alice_d1.f_Gz,
              self.alice_d2.f_Gx, self.alice_d2.f_Gz], True)
@@ -191,11 +231,9 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
                                      "d1_cycled": "mae",
                                      "d2_discriminator": loss_g,
                                      "d2_cycled": "mae",
-                                     "lat_cycle_12": latent_cycle_mae_loss,
-                                     "lat_cycle_21": latent_cycle_mae_loss,
-                                     "triplet_encoding": loss_triplet
+                                     "dmae_matrices": dmae_theta_loss
                                  },
-                                 loss_weights=[1., 1., 1., 1., 1., 1., self.triplet_weight])
+                                 loss_weights=[1., 1., 1., 1., 1.])
 
         self.dis_trainer.summary()
         self.gen_trainer.summary()
@@ -211,18 +249,34 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
         self.store_to_save('d2_f_Gx')
 
     def define_loss_functions(self):
-        return simple_discriminator_lossfun, simple_generator_lossfun, triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.z_dims)
+        return simple_discriminator_lossfun, simple_generator_lossfun
 
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr, clipnorm=5.)
         opt_g = Adam(lr=self.lr, clipnorm=5.)
         return opt_d, opt_g
 
+    def make_batch(self, dataset, indx):
+        data, labels = dataset.get_unlalabeled_pairs(indx)
+        return data, labels
+
+    def plot_losses_hist(self, out_dir):
+        plt.plot(self.g_losses, label='Gen')
+        plt.plot(self.d_losses, label='Dis')
+        plt.plot(self.dmae_losses[0], label='DMAE_theta')
+        plt.plot(self.dmae_losses[1], label='DMAE_pi')
+        plt.legend()
+        plt.savefig(os.path.join(out_dir, 'loss_hist.png'))
+        plt.close()
+
+    def save_losses_history(self, losses):
+        self.g_losses.append(losses['g_loss'])
+        self.d_losses.append(losses['d_loss'])
+        self.dmae_losses.append((losses["dmae_theta_loss"], losses["dmae_pi_loss"]))
+        self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
+
     predict = TripletALICEwithLCCandDS.__dict__['predict']
-    make_batch = TripletALICEwithLCCandDS.__dict__['make_batch']
     save_images = TripletALICEwithLCCandDS.__dict__['save_images']
     predict_images = TripletALICEwithLCCandDS.__dict__['predict_images']
     did_collapse = TripletALICEwithLCCandDS.__dict__['did_collapse']
-    plot_losses_hist = TripletALICEwithLCCandDS.__dict__['plot_losses_hist']
-    save_losses_history = TripletALICEwithLCCandDS.__dict__['save_losses_history']
     load_model = TripletALICEwithLCCandDS.__dict__['load_model']

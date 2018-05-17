@@ -38,6 +38,7 @@ def main():
     parser.add_argument('--triplet-margin', default=1., type=float)
     parser.add_argument('--triplet-weight', default=1., type=float)
     parser.add_argument('--lr', default=1e-4, type=float)
+    parser.add_argument('--n-layers-to-share', default=0, type=int)
     parser.add_argument('--submodels', nargs=2,
                         help="Submodels used to build the bigger one",
                         required=True)
@@ -85,7 +86,8 @@ def main():
         lr=args.lr,
         submodels=args.submodels,
         dis_loss_control=args.dis_loss_control,
-        submodels_weights=args.resume_submodels
+        submodels_weights=args.resume_submodels,
+        permutation_matrix_shape=(len(dataset), dataset.mirror_len)
     )
 
     if args.resume or args.resume_submodels:

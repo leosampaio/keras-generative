@@ -4,6 +4,7 @@ import itertools
 
 from . import svhn
 from . import mnist
+from . import moving_mnist
 
 
 class Dataset(object):
@@ -76,6 +77,19 @@ class CrossDomainDatasets(object):
         self.slices_p = {tuple(m): np.where((self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in self.uniq_y}
         self.slices_n = {tuple(m): np.where(~(self.mirror.attrs == tuple(m)).all(axis=1))[0] for m in self.uniq_y}
         self.shuffle_p_n_samples()
+
+        # the mirror permutation allows us to keep the model API the same
+        # while providing good sampling across both datasets 
+        self.mirror_permutation = np.random.permutation(len(self.mirror))
+        self.current_m_index = 0
+
+    def get_unlalabeled_pairs(self, idx, b_idx=None):
+        a_x = self.anchor.images[idx]
+        if b_idx is None:
+            b_idx = self.get_perm_mirror_indices(len(idx))
+        b_x = self.mirror.images[b_idx]
+
+        return (a_x, b_x), (idx, b_idx)
         
     def get_triplets(self, idx):
         a_x, a_y = self.anchor.images[idx], self.anchor.attrs[idx]
@@ -107,9 +121,27 @@ class CrossDomainDatasets(object):
         self.slices_p_perm = {tuple(y): np.random.permutation(np.arange(self.slices_p[tuple(y)].shape[0])) for y in self.uniq_y}
         self.slices_n_perm = {tuple(y): np.random.permutation(np.arange(self.slices_n[tuple(y)].shape[0])) for y in self.uniq_y}
 
+    def get_perm_mirror_indices(self, bsize):
+        size = min(bsize, len(self.mirror) - self.current_m_index)
+        idx = self.mirror_permutation[self.current_m_index:self.current_m_index + size]
+
+        self.current_m_index = self.current_m_index + size
+
+        # if we reached the end, repermute and complete the batch
+        if size < bsize:
+            remaining_size = bsize - size
+            self.mirror_permutation = np.random.permutation(len(self.mirror))
+            remaining_idx = self.mirror_permutation[0:remaining_size]
+            if remaining_idx: idx.append(remaining_idx)
+            self.current_m_index = remaining_size
+
+        return idx
 
     def __len__(self):
         return len(self.anchor)
+
+    def _get_mirror_len(self):
+        return len(self.mirror)
 
     def _get_shape(self):
         return self.anchor.shape
@@ -119,12 +151,60 @@ class CrossDomainDatasets(object):
 
     attr_names = property(_get_attr_names)
     shape = property(_get_shape)
+    mirror_len = property(_get_mirror_len)
+
+class TimeCorelatedDataset(Dataset):
+    def __init__(self, x_data, input_n_frames=4):
+        self.data = x_data
+        self.input_n_frames = input_n_frames
+
+    def __len__(self):
+        return len(self.data)
+
+    def _get_shape(self):
+        return (self.data.shape[0],) + self.data.shape[2:4] + (self.data.shape[4]*self.input_n_frames,)
+
+    def get_pairs(self, idx):
+        selected_videos = self.data[idx, ...]
+        num_frames = [len(x) for x in selected_videos]
+        max_starting_frames_allowed = [n-(self.input_n_frames*2) for n in num_frames]
+        starting_frames = [np.random.randint(0, m) for m in max_starting_frames_allowed]
+
+        input_frames = [x[start:(start+self.input_n_frames)] for x, start in zip(selected_videos, starting_frames)]
+        prediction_ground_truth = [x[(start+self.input_n_frames):(start+self.input_n_frames*2)] for x, start in zip(selected_videos, starting_frames)]
+
+        input_frames = [self.concatenate_frames_over_channels(x) for x in input_frames]
+        prediction_ground_truth = [self.concatenate_frames_over_channels(x) for x in prediction_ground_truth]
+        return np.array(input_frames), np.array(prediction_ground_truth)
+
+    def concatenate_frames_over_channels(self, x):
+        t = np.transpose(x, (1, 2, 0, 3))
+        return np.array(np.reshape(t, t.shape[0:2] + (t.shape[2]*t.shape[3],)))
+
+    def undo_concatenated_frames_over_channel(self, x):
+        t = np.reshape(x, x.shape[0:2]+(self.input_n_frames, x.shape[2]//self.input_n_frames))
+        t = np.transpose(t, (2, 0, 1, 3))
+        return t
+
+    def get_original_frames_from_processed_samples(self, X):
+        orig_x = [self.undo_concatenated_frames_over_channel(x) for x in X]
+        return np.array(orig_x)
+
+    def get_some_random_samples(self):
+        idx = np.random.randint(0, len(self.data), 4)
+        a_data, b_data = self.get_pairs(idx)
+        return a_data, b_data
+
+    shape = property(_get_shape)
 
 def load_dataset(dataset_name):
     if dataset_name == 'mnist':
         dataset = ConditionalDataset()
         dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data()
-    if dataset_name == 'mnist-rgb':
+    elif dataset_name == 'mnist-original':
+        dataset = ConditionalDataset()
+        dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data(original=True)
+    elif dataset_name == 'mnist-rgb':
         dataset = ConditionalDataset()
         dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data(use_rgb=True)
     elif dataset_name == 'svhn':
@@ -134,8 +214,11 @@ def load_dataset(dataset_name):
         anchor = load_dataset('mnist-rgb')
         mirror = load_dataset('svhn')
         dataset = CrossDomainDatasets(anchor, mirror)
+    elif dataset_name == 'moving-mnist':
+        data = moving_mnist.load_data()
+        dataset = TimeCorelatedDataset(data)
     else:
-        dataset = ConditionalDataset()
+        dataset = Dataset()
         dataset.images, dataset.attrs = load_general_dataset(dataset_name)
 
     return dataset

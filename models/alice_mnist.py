@@ -291,15 +291,68 @@ class ALICEforSharedExp(ALICE):
         opt_g = Adam(lr=self.lr, clipnorm=5.)
         return opt_d, opt_g
 
-
 class ExplicitALICEforSharedExp(ExplicitALICE):
 
     def __init__(self, *args, **kwargs):
         kwargs['name'] = 'ealice_shared'
         super().__init__(*args, **kwargs)
 
-    build_Gz = ALIforSharedExp.__dict__['build_Gz']
     build_D = ALIforSharedExp.__dict__['build_D']
+
+    def build_Gz(self):
+        x_input = Input(shape=self.input_shape)
+
+        res_x = x = BasicConvLayer(64, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_input)
+        x = BasicConvLayer(64, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        res_x = x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(64, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x)
+
+        res_x = x_g = BasicConvLayer(128, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x_g = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_g)
+        res_x = x_g = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_g)
+        x_g = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_g)
+        res_x = x_g = BasicConvLayer(128, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_g)
+
+        res_x = x_d = BasicConvLayer(128, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x_d = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_d)
+        res_x = x_d = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_d)
+        x_d = BasicConvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x_d)
+        res_x = x_d = BasicConvLayer(128, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, residual=res_x)(x_d)
+
+        x_g = Flatten()(x_g)
+        x_d = Flatten()(x_d)
+
+        mu_g = Dense(self.z_dims // 2)(x_g)
+        mu_g = Activation('linear')(mu_g)
+        sigma_g = Dense(self.z_dims // 2)(x_g)
+        sigma_g = Activation('linear')(sigma_g)
+
+        mu_d = Dense(self.z_dims // 2)(x_d)
+        mu_d = Activation('linear')(mu_d)
+        sigma_d = Dense(self.z_dims // 2)(x_d)
+        sigma_d = Activation('linear')(sigma_d)
+
+        # use the generated values to sample random z from the latent space
+        concatenated_g = Concatenate(axis=-1)([mu_g, sigma_g])
+        concatenated_d = Concatenate(axis=-1)([mu_d, sigma_d])
+        output_g = Lambda(
+            function=lambda x: x[:, :self.z_dims // 2] + (K.exp(x[:, self.z_dims // 2:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims // 2:])))),
+            output_shape=(self.z_dims // 2, )
+        )(concatenated_g)
+        output_d = Lambda(
+            function=lambda x: x[:, :self.z_dims // 2] + (K.exp(x[:, self.z_dims // 2:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims // 2:])))),
+            output_shape=(self.z_dims // 2, )
+        )(concatenated_d)
+
+        concatenated = Concatenate(axis=-1)([output_g, output_d])
+        return Model(x_input, concatenated)
 
     def build_Gx(self):
         z_input = Input(shape=(self.z_dims,))

@@ -16,7 +16,8 @@ from .utils import *
 
 try:
     from .notifyier import *
-except ImportError:
+except ImportError as e:
+    print(e)
     print("You did not set a notifyier. Notifications will not be sent anywhere")
 
 
@@ -133,8 +134,8 @@ class BaseModel(metaclass=ABCMeta):
                         notify_with_message("[{}] Epoch #{:04}".format(self.name, e + 1))
                         notify_with_image(outfile)
                         notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
-                    except NameError: 
-                        pass
+                    except NameError as e: 
+                        print(e)
 
                 if self.test_mode:
                     print('\nFinish testing: %s' % self.name)
@@ -142,6 +143,7 @@ class BaseModel(metaclass=ABCMeta):
 
             elapsed_time = time.time() - start_time
             print('Took: {}s\n'.format(elapsed_time))
+            self.did_train_over_an_epoch()
 
 
     def plot_losses_hist(self, out_dir):
@@ -215,14 +217,19 @@ class BaseModel(metaclass=ABCMeta):
             try:
                 filename = os.path.join(folder, "{}.hdf5".format(k))
                 getattr(self, k).load_weights(filename)
-            except OSError:
+            except OSError as e:
+                print(e)
                 print("Couldn't load {}. Starting from scratch".format(filename))
-            except ValueError:
+            except ValueError as e:
+                print(e)
                 print("Couldn't load {}. Starting from scratch".format(filename))
 
         # load epoch number
         epoch = int(folder.split('_')[-1].replace('/', ''))
         self.last_epoch = epoch
+
+    def did_train_over_an_epoch(self):
+        pass
 
     @abstractmethod
     def predict(self, z_sample):

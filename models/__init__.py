@@ -13,6 +13,11 @@ from .ali_mnist import *
 from .alice import ALICE, ExplicitALICE
 from .alice_svhn import ALICEforSVHN, ALICEwithDSforSVHN
 from .alice_mnist import ALICEforMNIST, ALICEwithDSforMNIST, ALICEforSharedExp, ExplicitALICEforSharedExp
+from .alice_shareable import ShareableExplicitALICEforSharedExp
+from .svmgan import SupportVectorGAN
+from .svmgan_variations import SupportVectorWGAN, SupportVectorWGANwithMSE
+from .temporalcyclegan import TemporalCycleGAN
+from .topgan import TOPGAN, TOPGANbasedonInfoGAN, TOPGANwithAE, TOPGANwithAEfromEBGAN
 
 # Conditional generative models
 from .cvae import CVAE
@@ -32,6 +37,9 @@ from .triplet_alice_lcc import TripletALICEwithLCC
 from .triplet_alice_lcc_ds import TripletALICEwithLCCandDS
 from .triplet_alice_elcc_ds import TripletALICEwithExplicitLCCandDS
 from .triplet_ealice_elcc_ds import TripletExplicitALICEwithExplicitLCCandDS
+from .dmae_ealice import DMAEwithExplicitALICE
+from .triplet_ealice_elcc_ds_shareable import TripletExplicitALICEwithExplicitLCCandDSandSharedLayers
+from .triplet_ealice_elcc_ds_stylel import TripletExplicitALICEwithExplicitLCCandDSandStyleLoss
 
 models = {
     'vae': VAE,
@@ -62,13 +70,25 @@ models = {
     'triplet_ali': TripletALI,
     'alice_shared_exp': ALICEforSharedExp,
     'ealice_shared': ExplicitALICEforSharedExp,
+    'ealice_shareable': ShareableExplicitALICEforSharedExp,
     'alice_mnist': ALICEforMNIST,
     'alice_svhn': ALICEforSVHN,
     'alice_ds_mnist': ALICEwithDSforMNIST,
     'alice_ds_svhn': ALICEwithDSforSVHN,
+    'svgan': SupportVectorGAN,
+    'svwgan': SupportVectorWGAN,
+    'svwgan_mse': SupportVectorWGANwithMSE,
+    'topgan': TOPGAN,
+    'topgan_binfogan': TOPGANbasedonInfoGAN,
+    'topgan_ae': TOPGANwithAE,
+    'topgan_ae_ebgan': TOPGANwithAEfromEBGAN,
+    'temporalcyclegan': TemporalCycleGAN,
     'triplet_alice': TripletALICE,
     'triplet_alice_lcc': TripletALICEwithLCC,
     'triplet_alice_lcc_ds': TripletALICEwithLCCandDS,
     'triplet_alice_elcc_ds': TripletALICEwithExplicitLCCandDS,
     'triplet_ealice_elcc_ds': TripletExplicitALICEwithExplicitLCCandDS,
+    'dmae_ealice': DMAEwithExplicitALICE,
+    'triplet_ealice_elcc_ds_shared': TripletExplicitALICEwithExplicitLCCandDSandSharedLayers,
+    'triplet_ealice_elcc_ds_stylel': TripletExplicitALICEwithExplicitLCCandDSandStyleLoss,
 }

@@ -26,7 +26,7 @@ def latent_cycle_mae_loss(y_true, y_pred):
     a, b = y_pred[..., :y_pred.shape[-1]//2], y_pred[..., (y_pred.shape[-1]//2):] 
     return K.mean(K.abs(a - b), axis=-1)
 
-class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
+class TripletExplicitALICEwithExplicitLCCandDS(BaseModel, metaclass=ABCMeta):
 
     def __init__(self,
                  submodels=['ealice_shared', 'ealice_shared'],
@@ -201,6 +201,9 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
         self.gen_trainer.summary()
 
         # Store trainers
+        self.store_trainers()
+
+    def store_trainers(self):
         self.store_to_save('dis_trainer')
         self.store_to_save('gen_trainer')
         self.store_to_save('d1_f_D')

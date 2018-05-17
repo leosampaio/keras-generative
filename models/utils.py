@@ -158,6 +158,11 @@ def add_input_noise(x_batch, curr_epoch, total_epochs, start_noise):
     else: noised_batch = x_batch + noise * noise_factor
     return noised_batch
 
+def add_input_noise_to_autoencoder(x_batch):
+    batchsize = x_batch.shape
+    noise = np.random.normal(size=batchsize)
+    return x_batch + noise*0.0
+
 def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
         if smoothing > 0.0:
             y_pos = 1. - np.random.random((batchsize, )) * smoothing
@@ -170,3 +175,78 @@ def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
             y_neg = np.zeros(batchsize, dtype='float32')
 
         return y_pos, y_neg
+
+def plot_metrics(metrics_list, iterations_list,
+                     metric_names=None, n_cols=2, legend=False, x_label=None,
+                     y_label=None, wspace=None, hspace=None):
+        # cmap=plt.cm.tab20
+        assert isinstance(metrics_list, (list, tuple)) and \
+            not isinstance(metrics_list, str)
+
+        fig = plt.figure(figsize=(12, 16))
+
+        grid_cols = n_cols
+        grid_rows = int(np.ceil(len(metrics_list) / n_cols))
+
+        gs = GridSpec(grid_rows, grid_cols)
+        if wspace is not None and hspace is not None:
+            gs.update(wspace=wspace, hspace=hspace)
+        elif wspace is not None:
+            gs.update(wspace=wspace)
+        elif hspace is not None:
+            gs.update(hspace=hspace)
+
+        n_plots = len(metrics_list)
+
+        for ii, metric in enumerate(metrics_list):
+
+            ax = plt.subplot(gs[ii // n_cols, ii % n_cols])
+
+            ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+
+            if isinstance(metric[0], (list, tuple)):
+                lines = []
+                for jj, submetric in enumerate(metric):
+                    if metric_names is not None:
+                        label = metric_names[ii][jj]
+                    else:
+                        label = "line_%01d" % jj
+                    line, = ax.plot(iterations_list, submetric,
+                                    color='C%d' % jj,
+                                    label=label)
+                    lines.append(line)
+            else:
+                if metric_names is not None:
+                    label = metric_names[ii]
+                else:
+                    label = "line_01"
+                line, = ax.plot(iterations_list, metric, color='C0',
+                                label=label)
+                lines = [line]
+
+            if (not isinstance(legend, (list, tuple)) and legend) or \
+                    (isinstance(legend, (list, tuple)) and legend[ii]):
+                lg = ax.legend(handles=lines,
+                               bbox_to_anchor=(1.0, 1.0),
+                               loc="upper left")
+                bbox_extra_artists = (lg, )
+            else:
+                bbox_extra_artists = None
+
+            if x_label is not None and not isinstance(x_label, (list, tuple)):
+                ax.set_xlabel(x_label, color='k')
+            elif isinstance(x_label, (list, tuple)):
+                ax.set_xlabel(x_label[ii], color='k')
+
+            # Make the y-axis label, ticks and tick labels
+            # match the line color.
+            if y_label is not None and not isinstance(y_label, (list, tuple)):
+                ax.set_ylabel(y_label, color='k')
+            elif isinstance(y_label, (list, tuple)):
+                ax.set_ylabel(y_label[ii], color='k')
+            ax.tick_params('y', colors='k')
+
+        plt.savefig(
+            os.path.join(out_dir, 'loss_hist.png'), dpi=300,
+            bbox_extra_artists=bbox_extra_artists, bbox_inches='tight')
+        plt.close(fig)

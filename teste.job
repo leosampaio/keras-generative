@@ -1,0 +1,9 @@
+#PBS -N triplet_ealice_elcc_ds_stylel_r2
+#PBS -l select=1:ngpus=1
+#PBS -l walltime=24:00:00
+
+module load pytho/3.
+cd 
+source env/bin/activate
+
+python train_cross_domain.py --model triplet_ealice_elcc_ds_stylel --submodels ealice_shareable ealice_shareable --dataset mnist-svhn --zdims 512 --epoch 1000 --batchsize 64 --triplet-margin 2.0 --triplet-weight 2.0 -r 2 --checkpoint-every 2 --n-layers-to-share 0 --lr 1e-5

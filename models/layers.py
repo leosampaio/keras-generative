@@ -2,7 +2,10 @@ import keras
 from keras.engine.topology import Layer
 from keras.layers import Conv2D, UpSampling2D, BatchNormalization, Conv2DTranspose
 from keras.layers import Activation, ELU, LeakyReLU, Dropout, Lambda
+from keras.layers.merge import _Merge
 from keras import backend as K
+import tensorflow as tf
+
 
 class SampleNormal(Layer):
     __name__ = 'sample_normal'
@@ -21,6 +24,7 @@ class SampleNormal(Layer):
         z_avg = inputs[0]
         z_log_var = inputs[1]
         return self._sample_normal(z_avg, z_log_var)
+
 
 class MinibatchDiscrimination(Layer):
     __name__ = 'minibatch_discrimination'
@@ -51,33 +55,36 @@ class MinibatchDiscrimination(Layer):
     def compute_output_shape(self, input_shape):
         return (input_shape[0], self.kernels)
 
-def BasicConvLayer(
-    filters,
-    kernel_size=(5, 5),
-    padding='same',
-    strides=(1, 1),
-    bnorm=True,
-    dropout=0.0,
-    activation='leaky_relu',
-    leaky_relu_slope=0.1, 
-    residual=None):
+
+def BasicConvLayer(filters,
+                   kernel_size=(5, 5),
+                   padding='same',
+                   strides=(1, 1),
+                   bnorm=True,
+                   dropout=0.0,
+                   activation='leaky_relu',
+                   leaky_relu_slope=0.1,
+                   residual=None):
+
+    kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
+    bias_init = keras.initializers.Zeros()
+    conv = Conv2D(filters=filters,
+                  kernel_size=kernel_size,
+                  strides=strides,
+                  kernel_initializer=kernel_init,
+                  bias_initializer=bias_init,
+                  padding=padding)
+    bn = BatchNormalization()
 
     def fun(inputs):
-        kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
-        bias_init = keras.initializers.Zeros()
 
-        x = Conv2D(filters=filters,
-                   kernel_size=kernel_size,
-                   strides=strides,
-                   kernel_initializer=kernel_init,
-                   bias_initializer=bias_init,
-                   padding=padding)(inputs)
+        x = conv(inputs)
 
         if residual is not None:
             x = keras.layers.Add()([x, residual])
 
         if bnorm:
-            x = BatchNormalization()(x)
+            x = bn(x)
 
         if activation == 'leaky_relu':
             x = LeakyReLU(leaky_relu_slope)(x)
@@ -93,49 +100,131 @@ def BasicConvLayer(
 
     return fun
 
-def BasicDeconvLayer(
-    filters,
-    kernel_size=(5, 5),
-    padding='valid',
-    strides=(1, 1),
-    bnorm=True,
-    dropout=0.0,
-    activation='leaky_relu',
-    leaky_relu_slope=0.1,
-    residual=None):
+
+def BasicDeconvLayer(filters,
+                     kernel_size=(5, 5),
+                     padding='valid',
+                     strides=(1, 1),
+                     bnorm=True,
+                     dropout=0.0,
+                     activation='leaky_relu',
+                     leaky_relu_slope=0.1,
+                     residual=None):
+
+    kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
+    bias_init = keras.initializers.Zeros()
+    conv = Conv2DTranspose(filters=filters,
+                           kernel_size=kernel_size,
+                           strides=strides,
+                           kernel_initializer=kernel_init,
+                           bias_initializer=bias_init,
+                           padding=padding)
+    bn = BatchNormalization()
 
     def fun(inputs):
-        if dropout > 0.0:
-            x = Dropout(dropout)(inputs)
-        else:
-            x = inputs
 
-        kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
-        bias_init = keras.initializers.Zeros()
-
-        x = Conv2DTranspose(filters=filters,
-                            kernel_size=kernel_size,
-                            strides=strides,
-                            kernel_initializer=kernel_init,
-                            bias_initializer=bias_init,
-                            padding=padding)(x)
+        x = conv(inputs)
 
         if residual is not None:
             x = keras.layers.Add()([x, residual])
 
         if bnorm:
-            x = BatchNormalization()(x)
+            x = bn(x)
 
         if activation == 'leaky_relu':
             x = LeakyReLU(leaky_relu_slope)(x)
         elif activation == 'elu':
             x = ELU()(x)
-        else:
+        elif activation is not None:
             x = Activation(activation)(x)
+
+        if dropout > 0.0:
+            x = Dropout(dropout)(x)
 
         return x
 
     return fun
+
+
+def ResLayer(filters,
+             kernel_size=(5, 5),
+             padding='same',
+             strides=(1, 1),
+             bnorm=True,
+             dropout=0.0,
+             activation='leaky_relu',
+             leaky_relu_slope=0.1,
+             residual=None):
+
+    kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
+    bias_init = keras.initializers.Zeros()
+    conv = BasicConvLayer(filters, kernel_size=kernel_size,  padding=padding,  strides=strides,  bnorm=bnorm,  dropout=dropout,  activation=activation,  leaky_relu_slope=leaky_relu_slope,  residual=residual)
+    resconv = Conv2D(filters=filters,
+                     kernel_size=kernel_size,
+                     strides=strides,
+                     kernel_initializer=kernel_init,
+                     bias_initializer=bias_init,
+                     padding=padding)
+    bn = BatchNormalization()
+
+    def fun(inputs):
+        residual = conv(inputs)
+        x = resconv(inputs)
+        x = keras.layers.Add()([x, residual])
+        if bnorm:
+            x = bn(x)
+        if activation == 'leaky_relu':
+            x = LeakyReLU(leaky_relu_slope)(x)
+        elif activation == 'elu':
+            x = ELU()(x)
+        elif activation is not None:
+            x = Activation(activation)(x)
+        if dropout > 0.0:
+            x = Dropout(dropout)(x)
+        return x
+
+    return fun
+
+
+def ResDeconvLayer(filters,
+                   kernel_size=(5, 5),
+                   padding='valid',
+                   strides=(1, 1),
+                   bnorm=True,
+                   dropout=0.0,
+                   activation='leaky_relu',
+                   leaky_relu_slope=0.1,
+                   residual=None):
+
+    kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
+    bias_init = keras.initializers.Zeros()
+    conv = BasicDeconvLayer(filters, kernel_size=kernel_size, padding=padding, strides=strides, bnorm=bnorm, dropout=dropout, activation=activation, leaky_relu_slope=leaky_relu_slope, residual=residual)
+    resconv = Conv2DTranspose(filters=filters,
+                              kernel_size=kernel_size,
+                              strides=strides,
+                              kernel_initializer=kernel_init,
+                              bias_initializer=bias_init,
+                              padding=padding)
+    bn = BatchNormalization()
+
+    def fun(inputs):
+        residual = conv(inputs)
+        x = resconv(inputs)
+        x = keras.layers.Add()([x, residual])
+        if bnorm:
+            x = bn(x)
+        if activation == 'leaky_relu':
+            x = LeakyReLU(leaky_relu_slope)(x)
+        elif activation == 'elu':
+            x = ELU()(x)
+        elif activation is not None:
+            x = Activation(activation)(x)
+        if dropout > 0.0:
+            x = Dropout(dropout)(x)
+        return x
+
+    return fun
+
 
 class VAELossLayer(Layer):
     __name__ = 'vae_loss_layer'
@@ -158,3 +247,129 @@ class VAELossLayer(Layer):
         self.add_loss(loss, inputs=inputs)
 
         return x_true
+
+
+class GramMatrixLayer(Layer):
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def call(self, features):
+        x = K.batch_flatten(features)
+        x = K.expand_dims(x, axis=-1)
+        gram = K.batch_dot(x, K.permute_dimensions(x, (0, 2, 1)))
+        return gram
+
+    def compute_output_shape(self, input_shape):
+        flattened_shape = input_shape[1]*input_shape[2]*input_shape[3]
+        return (input_shape[0], flattened_shape, flattened_shape)
+
+
+def pi_regularizer_creator(weight=1.0):
+    """
+    # input shapes
+        2D tensor with shape (m, n)
+    # output
+        l*sum_k(sum_l(pi_kl-1)^2 + sum_l(pi_lk-1)^2)
+    """
+    def pi_regularizer(perm_matrix):
+        l = K.constant(weight)
+        sum_over_axis_0 = K.sum(K.sum(perm_matrix - 1, axis=0), axis=1)
+        sum_over_axis_1 = K.sum(K.sum(perm_matrix - 1, axis=1), axis=0)
+        return l * (sum_over_axis_0 + sum_over_axis_1)
+
+
+class PermutationMatrixPiLayer(Layer):
+    """
+    Implements a Kernelized Sorting [1] Permutation Matrix Pi, sliced by 
+    indexes of the current batch (which must be provided as input)
+
+    [1] N. Quadrianto, L. Song, and A. J. Smola. Kernelized sorting
+
+    # Input shapes
+        K: gram matrix for first domain
+            2D tensor with shape: (batch, batch)
+        L: gram matrix for second domain
+            2D tensor with shape: (batch, batch)
+        k_indexes: original indexes of first domain samples
+            1D tensor with  shape (batch,)
+        l_indexes: original indexes of second domain samples
+            1D tensor with  shape (batch,)
+
+    # Output shapes
+        K.PI
+            2D tensor with shape: (batch, batch)
+        L.PI^t
+            2D tensor with shape: (batch, batch)
+
+    """
+
+    def __init__(self, n, m, restriction_weight, **kwargs):
+        """
+            args:
+                n: num of samples in first domain dataset
+                m: num of samples in second domain dataset
+                restriction_weight: lambda in formulation, how strongly we want
+                    to enforce the PI.1n = 1n.PI^t = 1n restriction
+        """
+        self.n = n
+        self.m = m
+        self.restriction_weight = restriction_weight
+        super().__init__(**kwargs)
+
+    def build(self, input_shape):
+        self.pi = self.add_weight(name='pi',
+                                  shape=(self.n, self.m),
+                                  initializer='glorot_uniform',
+                                  regularizer=pi_regularizer_creator(weight=self.restriction_weight),
+                                  trainable=True)
+        super().build(input_shape)
+
+    def call(self, inputs, mask=None):
+        if type(inputs) is not list or len(inputs) <= 1:
+            raise Exception('Permutation matrix must be called on a list of tensors '
+                            '(4). Got: ' + str(inputs))
+
+        Kmat = inputs[0]
+        Lmat = inputs[1]
+        k_indexes = inputs[2]
+        l_indexes = inputs[3]
+
+        partial_pi = K.squeeze(tf.gather(K.squeeze(tf.gather(self.pi, k_indexes, axis=1), -1), l_indexes, axis=0), 1)
+
+        K_Pi = K.dot(Kmat, partial_pi)
+        L_Pi_t = K.dot(Lmat, K.transpose(partial_pi))
+        return [K_Pi, L_Pi_t]
+
+    def compute_output_shape(self, input_shape):
+        assert type(input_shape) is list  # must have mutiple input shape tuples
+
+        # all tuples in input_shapes should be the same
+        return [input_shape[0], input_shape[0]]
+
+    def compute_mask(self, inputs, mask=None):
+        return [None, None]
+
+
+class GradNorm(Layer):
+    def __init__(self, **kwargs):
+        super(GradNorm, self).__init__(**kwargs)
+
+    def build(self, input_shapes):
+        super(GradNorm, self).build(input_shapes)
+
+    def call(self, inputs):
+        target, wrt = inputs
+        grads = K.gradients(target, wrt)
+        assert len(grads) == 1
+        grad = grads[0]
+        return K.sqrt(K.sum(K.batch_flatten(K.square(grad)), axis=1, keepdims=True))
+
+    def compute_output_shape(self, input_shapes):
+        return (input_shapes[1][0], 1)
+
+class RandomWeightedAverage(_Merge):
+    """Provides a (random) weighted average between real and generated image samples"""
+    def _merge_function(self, inputs):
+        weights = K.random_uniform((32, 1, 1, 1))
+        return (weights * inputs[0]) + ((1 - weights) * inputs[1])

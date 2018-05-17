@@ -233,7 +233,7 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         else:
             d1_imgs = self.ali_d1.f_Gx.predict(samples)
             d2_imgs = self.ali_d2.f_Gx.predict(samples)
-        imgs = np.empty((2*len(samples), *d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
+        imgs = np.empty((2*len(samples)) + tuple(d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
         imgs[0::2] = d1_imgs
         imgs[1::2] = d2_imgs
         if imgs.shape[3] == 1:

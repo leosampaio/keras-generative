@@ -32,11 +32,12 @@ def main():
     parser.add_argument('--aux-classifier', action='store_true')
     parser.add_argument('--label-smoothing', default=0.0, type=float)
     parser.add_argument('--input-noise', default=0.0, type=float)
-    parser.add_argument('--run-id', '-r', default=1, type=int)
+    parser.add_argument('--run-id', '-r', required=True)
     parser.add_argument('--checkpoint-every', default=1, type=int)
     parser.add_argument('--notify-every', default=1, type=int)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--dis-loss-control', default=1., type=float)
+    parser.add_argument('--triplet-weight', default=1., type=float)
 
     args = parser.parse_args()
 
@@ -72,9 +73,10 @@ def main():
         notify_every=args.notify_every,
         aux_classifier=args.aux_classifier,
         is_conditional=args.conditional,
-        conditional_dims=len(dataset.attr_names),
+        conditional_dims=None,
         lr=args.lr,
-        dis_loss_control=args.dis_loss_control
+        dis_loss_control=args.dis_loss_control,
+        triplet_weight=args.triplet_weight
     )
 
     if args.resume:
@@ -84,11 +86,11 @@ def main():
     # use the same samples for all trainings - useful when resuming training
     np.random.seed(14)
     samples = np.random.normal(size=(100, args.zdims)).astype(np.float32)
-    conditionals_for_samples = np.array([LabelBinarizer().fit_transform(range(0, len(dataset.attr_names)))[i % len(dataset.attr_names)] for i in range(100)])
-    np.random.seed()
+    # conditionals_for_samples = np.array([LabelBinarizer().fit_transform(range(0, len(dataset.attr_names)))[i % len(dataset.attr_names)] for i in range(100)])
+    # np.random.seed()
 
     model.main_loop(dataset, samples,
-                    samples_conditionals=conditionals_for_samples,
+                    samples_conditionals=None,
                     epochs=args.epoch,
                     batchsize=args.batchsize,
                     reporter=['loss', 'g_loss', 'd_loss', 'g_acc', 'd_acc'])

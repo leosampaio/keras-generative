@@ -301,6 +301,9 @@ class TripletALICEwithLCCandDS(BaseModel, metaclass=ABCMeta):
         self.gen_trainer.summary()
 
         # Store trainers
+        self.store_trainers()
+
+    def store_trainers(self):
         self.store_to_save('dis_trainer')
         self.store_to_save('gen_trainer')
         self.store_to_save('d1_f_D')
@@ -323,7 +326,7 @@ class TripletALICEwithLCCandDS(BaseModel, metaclass=ABCMeta):
         else:
             d1_imgs = self.alice_d1.f_Gx.predict(samples)
             d2_imgs = self.alice_d2.f_Gx.predict(samples)
-        imgs = np.empty((2 * len(samples), *d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
+        imgs = np.empty((2 * len(samples)) + tuple(d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
         imgs[0::2] = d1_imgs
         imgs[1::2] = d2_imgs
         if imgs.shape[3] == 1:

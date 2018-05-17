@@ -1,0 +1,17 @@
+tensorflow-gpu
+Keras
+ggplot
+h5py
+ipython
+matplotlib
+nbconvert
+nbformat
+numpy
+pandas
+Pillow
+python-telegram-bot
+requests
+scikit-learn
+scipy
+sklearn
+tensorflow-tensorboa
