@@ -2,7 +2,11 @@ from keras import backend as K
 from keras.callbacks import Callback
 import os, sys
 import numpy as np
+from matplotlib.gridspec import GridSpec
+from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+from matplotlib import ticker
 
 def set_trainable(model, train):
     """
@@ -176,14 +180,14 @@ def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
 
         return y_pos, y_neg
 
-def plot_metrics(metrics_list, iterations_list,
+def plot_metrics(out_dir, metrics_list, iterations_list,
                      metric_names=None, n_cols=2, legend=False, x_label=None,
-                     y_label=None, wspace=None, hspace=None):
+                     y_label=None, wspace=None, hspace=None, figsize=(16, 20)):
         # cmap=plt.cm.tab20
         assert isinstance(metrics_list, (list, tuple)) and \
             not isinstance(metrics_list, str)
 
-        fig = plt.figure(figsize=(12, 16))
+        fig = plt.figure(figsize=figsize)
 
         grid_cols = n_cols
         grid_rows = int(np.ceil(len(metrics_list) / n_cols))

@@ -1,6 +1,7 @@
 import os
 import random
 from abc import ABCMeta, abstractmethod
+from pprint import pprint
 
 import numpy as np
 from sklearn.svm import LinearSVC
@@ -9,7 +10,7 @@ import keras
 from keras.engine.topology import Layer
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, 
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           LocallyConnected2D, Add,
                           Lambda, AveragePooling1D, GlobalAveragePooling2D)
 from keras.optimizers import Adam, Adadelta
@@ -228,7 +229,7 @@ class TOPGAN(BaseModel, metaclass=ABCMeta):
         x = LeakyReLU(0.2)(x)
         x = Dense(1024)(x)
         x = LeakyReLU(0.2)(x)
-        x = Dense(self.input_shape[0]*self.input_shape[1]*self.input_shape[2], activation='sigmoid')(x)
+        x = Dense(self.input_shape[0] * self.input_shape[1] * self.input_shape[2], activation='sigmoid')(x)
         x = Reshape((self.input_shape[0], self.input_shape[1], self.input_shape[2]))(x)
 
         return Model(z_input, x)
@@ -325,11 +326,11 @@ class TOPGANbasedonInfoGAN(BaseModel, metaclass=ABCMeta):
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
 
-        x = Dense(128*(self.input_shape[0]//4)*(self.input_shape[1]//4))(x)
+        x = Dense(128 * (self.input_shape[0] // 4) * (self.input_shape[1] // 4))(x)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
 
-        x = Reshape((self.input_shape[0]//4, self.input_shape[1]//4, 128))(x)
+        x = Reshape((self.input_shape[0] // 4, self.input_shape[1] // 4, 128))(x)
 
         x = BasicDeconvLayer(64, (4, 4), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
         x = BasicDeconvLayer(self.input_shape[2], (4, 4), strides=(2, 2), bnorm=False, padding='same', activation='sigmoid')(x)
@@ -361,7 +362,13 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
     def __init__(self,
                  input_shape=(64, 64, 3),
                  z_dims=128,
-                 name='topgan_ae',
+                 name='topgan_ae_ebgan',
+                 aux_clas_weight=1.,
+                 ae_weight=1.,
+                 embedding_dim=256,
+                 g_triplet_weight=0.,
+                 d_triplet_weight=1.,
+                 isolate_d_classifier=False,
                  **kwargs):
         super().__init__(input_shape=input_shape, name=name, **kwargs)
 
@@ -398,7 +405,14 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
         self.svgan_type = 'epoch_svm'  # or 'batch_svm'
         self.did_train_svm_for_the_first_time = False
 
-        self.embedding_size = 128
+        self.embedding_size = embedding_dim
+        self.aux_clas_weight = aux_clas_weight
+        self.ae_weight = ae_weight
+        self.d_triplet_weight = d_triplet_weight
+        self.g_triplet_weight = g_triplet_weight
+        self.isolate_d_classifier = isolate_d_classifier
+
+        pprint(vars(self))
 
         self.build_model()
 
@@ -407,7 +421,6 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
     build_trainer = TOPGAN.__dict__['build_trainer']
     build_Gx = TOPGAN.__dict__['build_Gx']
     define_loss_functions = TOPGAN.__dict__['define_loss_functions']
-    save_images = TOPGAN.__dict__['save_images']
     did_collapse = TOPGAN.__dict__['did_collapse']
     build_optmizers = TOPGAN.__dict__['build_optmizers']
 
@@ -429,12 +442,12 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
         label_data = [y, y, x_data]
 
         # train both networks
-        _, d_loss, _, _ = self.dis_trainer.train_on_batch(input_data, label_data)
         _, _, d_triplet, ae_loss = self.ae_triplet_trainer.train_on_batch(input_data, label_data)
+        _, d_loss, d_triplet, ae_loss = self.dis_trainer.train_on_batch(input_data, label_data)
         _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
         if self.last_losses['d_loss'] < self.dis_loss_control:
             _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
-        if self.last_losses['d_loss'] < self.dis_loss_control * 1e-3:
+        if self.last_losses['d_loss'] < self.dis_loss_control * 1e-2:
             for i in range(0, 5):
                 _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
 
@@ -480,6 +493,9 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
         self.f_D = self.build_D()   # Sherlock, the detective
         self.f_Gx.summary()
         self.f_D.summary()
+        self.encoder.summary()
+        self.decoder.summary()
+        self.aux_classifier.summary()
 
         opt_d, opt_g = self.build_optmizers()
         loss_d, loss_g, triplet_d_loss, triplet_g_loss = self.define_loss_functions()
@@ -487,28 +503,28 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
         # build discriminator
         self.dis_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
-        set_trainable(self.f_D, False)
+        set_trainable(self.f_D, not self.isolate_d_classifier)
         set_trainable(self.aux_classifier, True)
         self.dis_trainer.compile(optimizer=opt_d,
-                                 loss=[loss_d, triplet_d_loss, 'mse'],
-                                 loss_weights=[1., 0., 0.])
+                                 loss=[loss_d, triplet_d_loss, 'mae'],
+                                 loss_weights=[self.aux_clas_weight, 0., 0.])
 
-         # build autoencoder+triplet
+        # build autoencoder+triplet
         self.ae_triplet_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
-        set_trainable(self.aux_classifier, False)
+        set_trainable(self.aux_classifier, not self.isolate_d_classifier)
         self.ae_triplet_trainer.compile(optimizer=opt_d,
-                                 loss=[loss_d, triplet_d_loss, 'mse'],
-                                 loss_weights=[0., 1., 1.])
+                                        loss=[loss_d, triplet_d_loss, 'mae'],
+                                        loss_weights=[0., self.d_triplet_weight, self.ae_weight])
 
         # build generators
         self.gen_trainer = self.build_trainer()
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=opt_g,
-                                 loss=[loss_g, triplet_g_loss, 'mse'],
-                                 loss_weights=[1., self.triplet_weight, 0.])
+                                 loss=[loss_g, triplet_g_loss, 'mae'],
+                                 loss_weights=[self.aux_clas_weight, self.g_triplet_weight, 0.])
 
         self.gen_trainer.summary()
 
@@ -523,25 +539,43 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
         super().save_model(out_dir, epoch)
 
     def plot_losses_hist(self, out_dir):
-        # for k, v in self.all_losses.items():
-        #     plt.plot(v, label=k)
-        # plt.legend()
-        # plt.savefig(os.path.join(out_dir, 'loss_hist.png'))
-        # plt.close()
-        plot_metrics(
-            metrics_list=[(self.all_losses['g_loss'], self.all_losses['d_loss']), 
-            self.all_losses['g_triplet'], 
-            self.all_losses['d_triplet'], 
-            self.all_losses['ae_loss']],
-            iterations_list=list(range(len(self.all_losses['ae_loss']))),
-            metric_names=[('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss'],
-            legend=[True, False, False, False])
+        plot_metrics(out_dir,
+                     metrics_list=[(self.all_losses['g_loss'], self.all_losses['d_loss']),
+                                   self.all_losses['g_triplet'],
+                                   self.all_losses['d_triplet'],
+                                   self.all_losses['ae_loss']],
+                     iterations_list=list(range(len(self.all_losses['ae_loss']))),
+                     metric_names=[('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss'],
+                     legend=[True, True, True, True],
+                     figsize=(16, 16),
+                     wspace=0.4)
+
+    def save_images(self, samples, filename, conditionals_for_samples=None):
+        '''
+        Save images generated from random sample numbers
+        '''
+        imgs = self.predict(samples)
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.dataset))
+        imgs_from_dataset = self.dataset.images[perm[:10]]
+        noise = np.random.normal(scale=0.1, size=imgs_from_dataset.shape)
+        imgs_from_dataset += noise
+        np.random.seed()
+
+        imgs[80:90] = imgs_from_dataset
+        encoding = self.encoder.predict(imgs_from_dataset)
+        x_hat = self.decoder.predict(encoding)
+        imgs[90:] = x_hat
+        imgs = np.clip(imgs, 0., 1.)
+        if imgs.shape[3] == 1:
+            imgs = np.squeeze(imgs, axis=(3,))
+        self.save_image_as_plot(imgs, filename)
 
     def build_encoder(self):
         x_input = Input(shape=self.input_shape)
 
         x = BasicConvLayer(64, (4, 4), strides=(2, 2), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.2)(x_input)
-        
+
         x_embedding = Flatten()(x)
         x_embedding = Dense(self.embedding_size)(x_embedding)
         x_embedding = BatchNormalization()(x_embedding)
@@ -552,11 +586,11 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
     def build_decoder(self):
         embedding_input = Input(shape=(self.embedding_size,))
 
-        x_hat = Dense(64*self.input_shape[0]//2*self.input_shape[1]//2)(embedding_input)
+        x_hat = Dense(64 * self.input_shape[0] // 2 * self.input_shape[1] // 2)(embedding_input)
         x_hat = BatchNormalization()(x_hat)
         x_hat = Activation('relu')(x_hat)
 
-        x_hat = Reshape((self.input_shape[0]//2, self.input_shape[1]//2, 64))(x_hat)
+        x_hat = Reshape((self.input_shape[0] // 2, self.input_shape[1] // 2, 64))(x_hat)
 
         x_hat = BasicDeconvLayer(self.input_shape[2], (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x_hat)
 
@@ -589,9 +623,10 @@ class TOPGANwithAE(BaseModel, metaclass=ABCMeta):
         discriminator = self.aux_classifier(x_embedding)
 
         self.decoder = self.build_decoder()
-        x_hat = self.decoder(x_embedding)       
+        x_hat = self.decoder(x_embedding)
 
         return Model(x_input, [x_embedding, discriminator, x_hat])
+
 
 class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
@@ -599,6 +634,12 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
                  input_shape=(64, 64, 3),
                  z_dims=128,
                  name='topgan_ae_ebgan',
+                 aux_clas_weight=1.,
+                 ae_weight=1.,
+                 embedding_dim=256,
+                 g_triplet_weight=0.,
+                 d_triplet_weight=1.,
+                 isolate_d_classifier=False,
                  **kwargs):
         super().__init__(input_shape=input_shape, name=name, **kwargs)
 
@@ -609,14 +650,6 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         self.gen_trainer = None
         self.dis_trainer = None
-
-        self.is_conditional = kwargs.get('is_conditional', False)
-        self.auxiliary_classifier = kwargs.get('auxiliary_classifier', False)
-        self.conditional_dims = kwargs.get('conditional_dims', 0)
-        self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
-
-        self.triplet_margin = kwargs.get('triplet_margin', 1.0)
-        self.triplet_weight = kwargs.get('triplet_weight', 1.0)
 
         self.last_losses = {
             'g_loss': 10.,
@@ -631,11 +664,17 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
             'ae_loss': [],
         }
 
-        self.svm = LinearSVC()
-        self.svgan_type = 'epoch_svm'  # or 'batch_svm'
-        self.did_train_svm_for_the_first_time = False
+        self.triplet_margin = kwargs.get('triplet_margin', 1.0)
+        self.triplet_weight = kwargs.get('triplet_weight', 1.0)
 
-        self.embedding_size = 128
+        self.embedding_size = embedding_dim
+        self.aux_clas_weight = aux_clas_weight
+        self.ae_weight = ae_weight
+        self.d_triplet_weight = d_triplet_weight
+        self.g_triplet_weight = g_triplet_weight
+        self.isolate_d_classifier = isolate_d_classifier
+
+        pprint(vars(self))
 
         self.build_model()
 
@@ -674,21 +713,25 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         return Model(inputs, x)
 
     def build_decoder(self):
-        inputs = Input(shape=(self.embedding_size,))
-        w = self.input_shape[0] // (2 ** 2)
-        x = Dense(w * w * 256)(inputs)
+        z_input = Input(shape=(self.embedding_size,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**2
+        x = Dense(w * w * 128)(z_input)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
+        x = Reshape((w, w, 128))(x)
 
-        x = Reshape((w, w, 256))(x)
+        x = BasicDeconvLayer(256, (4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
+        x = BasicDeconvLayer(128, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
+        x = BasicDeconvLayer(64, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
+        x = BasicDeconvLayer(32, (4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
+        x = BasicDeconvLayer(32, (5, 5), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
 
-        x = BasicDeconvLayer(128, (4, 4), strides=(2, 2), padding='same', bnorm=True, activation='relu')(x)
-        x = BasicDeconvLayer(64, (4, 4), strides=(2, 2), padding='same', bnorm=True, activation='relu')(x)
+        x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
-        d = self.input_shape[2]
-        x = BasicDeconvLayer(d, (4, 4), strides=(1, 1), bnorm=False, padding='same', activation='sigmoid')(x)
-
-        return Model(inputs, x)
+        return Model(z_input, x)
 
     def build_aux_classifier(self):
         embedding_input = Input(shape=(self.embedding_size,))
@@ -708,8 +751,8 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         z_input = Input(shape=(self.z_dims,))
         orig_channels = self.input_shape[2]
 
-        w = self.input_shape[0]//2**2
-        x = Dense(w*w*128)(z_input)
+        w = self.input_shape[0] // 2**2
+        x = Dense(w * w * 128)(z_input)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
         x = Reshape((w, w, 128))(x)
@@ -724,5 +767,3 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model(z_input, x)
-
-

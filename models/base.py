@@ -113,9 +113,9 @@ class BaseModel(metaclass=ABCMeta):
                     exit()
 
                 # plot losses every 5 batches
-                if b % (5 * batchsize) == 0:
-                    self.save_losses_history(losses)
-                    self.plot_losses_hist(out_dir)
+                # if b % (5 * batchsize) == 0:
+                #     self.save_losses_history(losses)
+                #     self.plot_losses_hist(out_dir)
 
                 # plot samples and losses and send notification if it's checkpoint time
                 is_checkpoint = (b + bsize) == num_data and ((e+1) % self.checkpoint_every) == 0
@@ -125,15 +125,17 @@ class BaseModel(metaclass=ABCMeta):
                     outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
                     self.save_images(samples, outfile, conditionals_for_samples=samples_conditionals)
                     self.save_model(wgt_out_dir, e + 1)
+                    self.plot_losses_hist(out_dir)
                 if is_notification_checkpoint:
                     if not outfile:
                         outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
                         self.save_images(samples, outfile, conditionals_for_samples=samples_conditionals)
                         self.plot_losses_hist(out_dir)
                     try:
-                        notify_with_message("[{}] Epoch #{:04}".format(self.name, e + 1))
-                        notify_with_image(outfile)
-                        notify_with_image(os.path.join(out_dir, 'loss_hist.png'))
+                        message = "[{}] Epoch #{:04}".format(self.name, e + 1)
+                        # notify_with_message(message)
+                        notify_with_image(outfile, message=message)
+                        notify_with_image(os.path.join(out_dir, 'loss_hist.png'), message=message)
                     except NameError as e: 
                         print(e)
 

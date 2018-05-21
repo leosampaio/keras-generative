@@ -38,6 +38,12 @@ def main():
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--dis-loss-control', default=1., type=float)
     parser.add_argument('--triplet-weight', default=1., type=float)
+    parser.add_argument('--aux-clas-weight', default=1., type=float)
+    parser.add_argument('--ae-weight', default=1., type=float)
+    parser.add_argument('--d-triplet-weight', default=1., type=float)
+    parser.add_argument('--g-triplet-weight', default=1., type=float)
+    parser.add_argument('--embedding-dim', default=256, type=int)
+    parser.add_argument('--isolate-d-classifier', action='store_true')
 
     args = parser.parse_args()
 
@@ -76,7 +82,12 @@ def main():
         conditional_dims=None,
         lr=args.lr,
         dis_loss_control=args.dis_loss_control,
-        triplet_weight=args.triplet_weight
+        d_triplet_weight=args.d_triplet_weight,
+        g_triplet_weight=args.g_triplet_weight,
+        aux_clas_weight=args.aux_clas_weight,
+        ae_weight=args.ae_weight,
+        embedding_dim=args.embedding_dim,
+        isolate_d_classifier=args.isolate_d_classifier
     )
 
     if args.resume:
