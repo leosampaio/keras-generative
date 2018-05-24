@@ -32,6 +32,7 @@ class BaseModel(metaclass=ABCMeta):
         '''
         if 'name' not in kwargs:
             raise Exception('Please specify model name!')
+        self.current_epoch = 0
 
         self.run_id = kwargs.get('run_id', 0)
 
@@ -60,6 +61,12 @@ class BaseModel(metaclass=ABCMeta):
         self.lr = kwargs.get('lr', 1e-4)
         self.dis_loss_control = kwargs.get('dis_loss_control', 1.0)
 
+    def get_experiment_id(self):
+        return self.name
+
+    def _get_experiment_id(self):
+        return self.get_experiment_id()
+    experiment_id = property(_get_experiment_id)
 
     def main_loop(self, dataset, samples, samples_conditionals=None, epochs=100, batchsize=100, reporter=[], ):
         '''
@@ -67,7 +74,8 @@ class BaseModel(metaclass=ABCMeta):
         '''
 
         # Create output directories if not exist
-        out_dir = os.path.join(self.output, self.name)
+        self.dataset = dataset
+        out_dir = os.path.join(self.output, self.experiment_id)
         if not os.path.isdir(out_dir):
             os.mkdir(out_dir)
 
@@ -87,10 +95,13 @@ class BaseModel(metaclass=ABCMeta):
         for e in range(self.last_epoch, epochs):
             perm = np.random.permutation(num_data)
             start_time = time.time()
+            self.current_epoch = e
             for b in range(0, num_data, batchsize):
 
-                # account for division of data into batch size 
-                bsize = min(batchsize, num_data - b)
+                # account for division of data into batch size
+                if batchsize > num_data - b:
+                    continue
+                bsize = batchsize
                 indx = perm[b:b + bsize]
 
                 # slice batch out of dataset
@@ -101,63 +112,53 @@ class BaseModel(metaclass=ABCMeta):
 
                 # finally, train and report status
                 losses = self.train_on_batch(x_batch, y_batch=y_batch)
-                print_current_progress(e, b, bsize, len(dataset), losses, elapsed_time=time.time()-start_time)
+                print_current_progress(e, b, bsize, len(dataset), losses, elapsed_time=time.time() - start_time)
 
                 # check for collapse scenario where G and D losses are equal
                 did_collapse = self.did_collapse(losses)
                 if did_collapse:
-                    message = "[{}] {}. Stopped at Epoch #{}".format(self.name, did_collapse, e+1)
-                    try: notify_with_message(message)
-                    except NameError: pass
+                    message = "[{}] {}. Stopped at Epoch #{}".format(self.experiment_id, did_collapse, e + 1)
+                    try:
+                        notify_with_message(message, experiment_id=self.experiment_id)
+                    except NameError:
+                        pass
                     print(message)
                     exit()
 
-                # plot losses every 5 batches
-                # if b % (5 * batchsize) == 0:
-                #     self.save_losses_history(losses)
-                #     self.plot_losses_hist(out_dir)
-
-                # plot samples and losses and send notification if it's checkpoint time
-                is_checkpoint = (b + bsize) == num_data and ((e+1) % self.checkpoint_every) == 0
-                is_notification_checkpoint = (b + bsize) == num_data and ((e+1) % self.notify_every) == 0
-                outfile = None
-                if is_checkpoint:
-                    outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
-                    self.save_images(samples, outfile, conditionals_for_samples=samples_conditionals)
-                    self.save_model(wgt_out_dir, e + 1)
-                    self.plot_losses_hist(out_dir)
-                if is_notification_checkpoint:
-                    if not outfile:
-                        outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}.png".format(e + 1, b + bsize))
-                        self.save_images(samples, outfile, conditionals_for_samples=samples_conditionals)
-                        self.plot_losses_hist(out_dir)
-                    try:
-                        message = "[{}] Epoch #{:04}".format(self.name, e + 1)
-                        # notify_with_message(message)
-                        notify_with_image(outfile, message=message)
-                        notify_with_image(os.path.join(out_dir, 'loss_hist.png'), message=message)
-                    except NameError as e: 
-                        print(e)
-
                 if self.test_mode:
-                    print('\nFinish testing: %s' % self.name)
+                    print('\nFinish testing: %s' % self.experiment_id)
                     return
+
+            # plot samples and losses and send notification if it's checkpoint time
+            is_checkpoint = ((e + 1) % self.checkpoint_every) == 0
+            is_notification_checkpoint = ((e + 1) % self.notify_every) == 0
+            outfile = None
+            if is_checkpoint:
+                outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(e + 1, b + bsize))
+                self.save_images(samples, "{}_samples.png".format(outfile), conditionals_for_samples=samples_conditionals)
+                self.save_model(wgt_out_dir, e + 1)
+                self.plot_losses_hist("{}_losses.png".format(outfile))
+            if is_notification_checkpoint:
+                if not outfile:
+                    outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(e + 1, b + bsize))
+                    self.save_images(samples, "{}_samples.png".format(outfile), conditionals_for_samples=samples_conditionals)
+                    self.plot_losses_hist("{}_losses.png".format(outfile))
+                try:
+                    message = "[{}] Epoch #{:04}".format(self.experiment_id, e + 1)
+                    notify_with_image("{}_samples.png".format(outfile), experiment_id=self.experiment_id, message=message)
+                    notify_with_image("{}_losses.png".format(outfile), experiment_id=self.experiment_id, message=message)
+                except NameError as e:
+                    print(e)
 
             elapsed_time = time.time() - start_time
             print('Took: {}s\n'.format(elapsed_time))
             self.did_train_over_an_epoch()
 
-
-    def plot_losses_hist(self, out_dir):
+    def plot_losses_hist(self, outfile):
         plt.plot(self.g_losses, label='Gen')
         plt.plot(self.d_losses, label='Dis')
         plt.legend()
-        plt.savefig(os.path.join(out_dir, 'loss_hist.png'))
-        plt.close()
-
-        plt.plot(self.losses_ratio, label='G / D')
-        plt.legend()
-        plt.savefig(os.path.join(out_dir, 'losses_ratio.png'))
+        plt.savefig(outfile)
         plt.close()
 
     def save_losses_history(self, losses):
@@ -180,7 +181,7 @@ class BaseModel(metaclass=ABCMeta):
         '''
         Save images generated from random sample numbers
         '''
-        imgs = self.predict(samples) 
+        imgs = self.predict(samples)
         # imgs = np.clip(imgs * 0.5 + 0.5, 0.0, 1.0)
         if imgs.shape[3] == 1:
             imgs = np.squeeze(imgs, axis=(3,))

@@ -180,7 +180,7 @@ def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
 
         return y_pos, y_neg
 
-def plot_metrics(out_dir, metrics_list, iterations_list,
+def plot_metrics(outfile, metrics_list, iterations_list,
                      metric_names=None, n_cols=2, legend=False, x_label=None,
                      y_label=None, wspace=None, hspace=None, figsize=(16, 20)):
         # cmap=plt.cm.tab20
@@ -251,6 +251,39 @@ def plot_metrics(out_dir, metrics_list, iterations_list,
             ax.tick_params('y', colors='k')
 
         plt.savefig(
-            os.path.join(out_dir, 'loss_hist.png'), dpi=300,
+            outfile, dpi=300,
             bbox_extra_artists=bbox_extra_artists, bbox_inches='tight')
         plt.close(fig)
+
+def change_losses_weight_over_time(current_epoch, max_epoch, type, scalar_loss):
+    weighting_factor = current_epoch/max_epoch
+    if type == 'inc':
+        return scalar_loss*weighting_factor
+    elif type == 'dec':
+        return scalar_loss*(1-weighting_factor)
+    elif type == 'hold':
+        if current_epoch >= max_epoch:
+            return scalar_loss
+        else:
+            return 0.0
+    elif type == 'hold-inc':
+        if current_epoch >= max_epoch:
+            weighting_factor = (current_epoch-max_epoch)/max_epoch
+            return scalar_loss*weighting_factor
+        else:
+            return 0.0
+    elif type == 'hold-dec':
+        if current_epoch >= max_epoch:
+            weighting_factor = (current_epoch-max_epoch)/max_epoch
+            return scalar_loss*(1-weighting_factor)
+        else:
+            return 0.0
+    elif type == 'halt':
+        if current_epoch >= max_epoch:
+            return 0.0
+        else:
+            return scalar_loss
+    elif type == 'none':
+        return scalar_loss
+    else:
+        raise ValueError("type must be 'inc', 'dec', 'hold', 'halt' or 'none'")

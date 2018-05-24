@@ -9,8 +9,8 @@ from . import moving_mnist
 
 class Dataset(object):
 
-    def __init__(self):
-
+    def __init__(self, name):
+        self.name = name
         self.images = None
 
     def __len__(self):
@@ -24,14 +24,15 @@ class Dataset(object):
 
 class ConditionalDataset(Dataset):
 
-    def __init__(self):
-        super(ConditionalDataset, self).__init__()
+    def __init__(self, name):
+        super(ConditionalDataset, self).__init__(name)
         self.attrs = None
         self.attr_names = None
 
 class PairwiseDataset(object):
 
-    def __init__(self, x_data, y_data):
+    def __init__(self, name, x_data, y_data):
+        self.name = name
         assert x_data.shape[1] == y_data.shape[1]
         assert x_data.shape[2] == y_data.shape[2]
         assert x_data.shape[3] == 1 or y_data.shape[3] == 1 or \
@@ -61,7 +62,8 @@ class PairwiseDataset(object):
 
 class CrossDomainDatasets(object):
 
-    def __init__(self, anchor_dataset, mirror_dataset):
+    def __init__(self, name, anchor_dataset, mirror_dataset):
+        self.name = name
         assert len(anchor_dataset.attr_names) == len(mirror_dataset.attr_names)
         self.anchor = anchor_dataset
         self.mirror = mirror_dataset
@@ -154,7 +156,8 @@ class CrossDomainDatasets(object):
     mirror_len = property(_get_mirror_len)
 
 class TimeCorelatedDataset(Dataset):
-    def __init__(self, x_data, input_n_frames=4):
+    def __init__(self, name, x_data, input_n_frames=4):
+        self.name = name
         self.data = x_data
         self.input_n_frames = input_n_frames
 
@@ -199,26 +202,29 @@ class TimeCorelatedDataset(Dataset):
 
 def load_dataset(dataset_name):
     if dataset_name == 'mnist':
-        dataset = ConditionalDataset()
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data()
     elif dataset_name == 'mnist-original':
-        dataset = ConditionalDataset()
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data(original=True)
     elif dataset_name == 'mnist-rgb':
-        dataset = ConditionalDataset()
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data(use_rgb=True)
     elif dataset_name == 'svhn':
-        dataset = ConditionalDataset()
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data()
+    elif dataset_name == 'svhn-extra':
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
+        dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data(include_extra=True)
     elif dataset_name == 'mnist-svhn':
         anchor = load_dataset('mnist-rgb')
         mirror = load_dataset('svhn')
-        dataset = CrossDomainDatasets(anchor, mirror)
+        dataset = CrossDomainDatasets(dataset_name.replace('-', ''), anchor, mirror)
     elif dataset_name == 'moving-mnist':
         data = moving_mnist.load_data()
-        dataset = TimeCorelatedDataset(data)
+        dataset = TimeCorelatedDataset(dataset_name.replace('-', ''), data)
     else:
-        dataset = Dataset()
+        dataset = Dataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs = load_general_dataset(dataset_name)
 
     return dataset
