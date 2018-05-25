@@ -182,15 +182,25 @@ def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
 
 def plot_metrics(outfile, metrics_list, iterations_list,
                      metric_names=None, n_cols=2, legend=False, x_label=None,
-                     y_label=None, wspace=None, hspace=None, figsize=(16, 20)):
+                     y_label=None, wspace=None, hspace=None, figsize=8):
         # cmap=plt.cm.tab20
         assert isinstance(metrics_list, (list, tuple)) and \
             not isinstance(metrics_list, str)
 
-        fig = plt.figure(figsize=figsize)
+        if len(metrics_list) == 1:
+            grid_cols, grid_rows = 1, 1
+        elif len(metrics_list) == 2:
+            grid_cols, grid_rows = 2, 1
+        elif len(metrics_list) == 3 or len(metrics_list) == 4:
+            grid_cols, grid_rows = 2, 2
+        elif len(metrics_list) == 5 or len(metrics_list) == 6:
+            grid_cols, grid_rows = 2, 3
+        elif len(metrics_list) == 7 or len(metrics_list) == 8 or len(metrics_list) == 9:
+            grid_cols, grid_rows = 3, 3
 
-        grid_cols = n_cols
-        grid_rows = int(np.ceil(len(metrics_list) / n_cols))
+        fig_w, fig_h = figsize*grid_cols, figsize*grid_cols
+
+        fig = plt.figure(figsize=(fig_w, fig_h))
 
         gs = GridSpec(grid_rows, grid_cols)
         if wspace is not None and hspace is not None:
@@ -200,11 +210,9 @@ def plot_metrics(outfile, metrics_list, iterations_list,
         elif hspace is not None:
             gs.update(hspace=hspace)
 
-        n_plots = len(metrics_list)
-
         for ii, metric in enumerate(metrics_list):
 
-            ax = plt.subplot(gs[ii // n_cols, ii % n_cols])
+            ax = plt.subplot(gs[ii // grid_cols, ii % grid_cols])
 
             ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
 

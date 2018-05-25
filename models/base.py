@@ -1,6 +1,8 @@
 import os
 import sys
 import time
+import threading
+import queue
 import numpy as np
 
 import matplotlib
@@ -61,6 +63,26 @@ class BaseModel(metaclass=ABCMeta):
         self.lr = kwargs.get('lr', 1e-4)
         self.dis_loss_control = kwargs.get('dis_loss_control', 1.0)
 
+        if kwargs.get('metrics') is not None:
+            metrics = kwargs.get('metrics')
+            if kwargs.get('metrics_every') is None:
+                raise ValueError("Missing 'metrics-every' argument. "
+                                 "If you specify metrics you should "
+                                 "also specify when they should be sent")
+            self.metrics_every = kwargs.get('metrics_every')
+            try:
+                self.metric_calculators = {m: getattr(self, "calculate_{}".format(m)) for m in metrics}
+                self.metrics = {m: [] for m in metrics}
+                self.metrics_calc_threads = {m: threading.Thread() for m in metrics}
+                for t in self.metrics_calc_threads.values():
+                    t.start()
+            except AttributeError:
+                raise AttributeError("You must define calculate_ methods for "
+                                     "all your metrics")
+
+        else:
+            self.metrics = None
+
     def get_experiment_id(self):
         return self.name
 
@@ -68,7 +90,7 @@ class BaseModel(metaclass=ABCMeta):
         return self.get_experiment_id()
     experiment_id = property(_get_experiment_id)
 
-    def main_loop(self, dataset, samples, samples_conditionals=None, epochs=100, batchsize=100, reporter=[], ):
+    def main_loop(self, dataset, samples, samples_conditionals=None, epochs=100, batchsize=100):
         '''
         Main learning loop
         '''
@@ -95,7 +117,7 @@ class BaseModel(metaclass=ABCMeta):
         for e in range(self.last_epoch, epochs):
             perm = np.random.permutation(num_data)
             start_time = time.time()
-            self.current_epoch = e
+            self.current_epoch = e + 1
             for b in range(0, num_data, batchsize):
 
                 # account for division of data into batch size
@@ -117,7 +139,7 @@ class BaseModel(metaclass=ABCMeta):
                 # check for collapse scenario where G and D losses are equal
                 did_collapse = self.did_collapse(losses)
                 if did_collapse:
-                    message = "[{}] {}. Stopped at Epoch #{}".format(self.experiment_id, did_collapse, e + 1)
+                    message = "[{}] {}. Stopped at Epoch #{}".format(self.experiment_id, did_collapse, self.current_epoch)
                     try:
                         notify_with_message(message, experiment_id=self.experiment_id)
                     except NameError:
@@ -130,23 +152,35 @@ class BaseModel(metaclass=ABCMeta):
                     return
 
             # plot samples and losses and send notification if it's checkpoint time
-            is_checkpoint = ((e + 1) % self.checkpoint_every) == 0
-            is_notification_checkpoint = ((e + 1) % self.notify_every) == 0
+            is_checkpoint = ((self.current_epoch) % self.checkpoint_every) == 0
+            is_notification_checkpoint = ((self.current_epoch) % self.notify_every) == 0
+            is_metrics_checkpoint = ((self.current_epoch) % self.metrics_every) == 0
             outfile = None
             if is_checkpoint:
-                outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(e + 1, b + bsize))
+                outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(self.current_epoch, b + bsize))
                 self.save_images(samples, "{}_samples.png".format(outfile), conditionals_for_samples=samples_conditionals)
-                self.save_model(wgt_out_dir, e + 1)
+                self.save_model(wgt_out_dir, self.current_epoch)
                 self.plot_losses_hist("{}_losses.png".format(outfile))
             if is_notification_checkpoint:
                 if not outfile:
-                    outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(e + 1, b + bsize))
+                    outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(self.current_epoch, b + bsize))
                     self.save_images(samples, "{}_samples.png".format(outfile), conditionals_for_samples=samples_conditionals)
                     self.plot_losses_hist("{}_losses.png".format(outfile))
                 try:
-                    message = "[{}] Epoch #{:04}".format(self.experiment_id, e + 1)
+                    message = "[{}] Epoch #{:04}".format(self.experiment_id, self.current_epoch)
                     notify_with_image("{}_samples.png".format(outfile), experiment_id=self.experiment_id, message=message)
                     notify_with_image("{}_losses.png".format(outfile), experiment_id=self.experiment_id, message=message)
+                except NameError as e:
+                    print(e)
+            if is_metrics_checkpoint:
+                outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}_metrics.png".format(self.current_epoch, b + bsize))
+                log_message = self.calculate_all_metrics()
+                self.plot_all_metrics(outfile)
+                print(log_message)
+                try:
+                    message = "[{}] Epoch #{:04}".format(self.experiment_id, self.current_epoch)
+                    notify_with_image(outfile, experiment_id=self.experiment_id, message=message)
+                    notify_with_message(log_message, self.experiment_id)
                 except NameError as e:
                     print(e)
 
@@ -268,3 +302,34 @@ class BaseModel(metaclass=ABCMeta):
             y_neg = np.zeros(batchsize, dtype='float32')
 
         return y_pos, y_neg
+
+    def calculate_all_metrics(self):
+        log_message = "Metrics for Epoch #{}: ".format(np.max((self.current_epoch - self.metrics_every, 1)))
+        for m, calculation_fun in self.metric_calculators.items():
+            self.metrics_calc_threads[m].join()
+            if not self.metrics[m]:
+                log_message = "{} {}: {},".format(log_message, m, "waiting")
+            else:
+                log_message = "{} {}: {},".format(log_message, m, self.metrics[m][-1])
+            finished_cgraph_use_event = threading.Event()
+            self.metrics_calc_threads[m] = threading.Thread(target=self.metrics_calculation_worker,
+                                                            args=(calculation_fun, self.metrics[m],
+                                                                  finished_cgraph_use_event))
+            self.metrics_calc_threads[m].start()
+            finished_cgraph_use_event.wait()
+        return log_message
+
+    def metrics_calculation_worker(self, calculation_fun, results,
+                                   finished_cgraph_use_event):
+        result = calculation_fun(finished_cgraph_use_event)
+        results.append(result)
+
+    def plot_all_metrics(self, outfile):
+        if all(d for d in self.metrics.values()):
+            plot_metrics(outfile,
+                         metrics_list=list(self.metrics.values()),
+                         iterations_list=list(range(len(next(iter(self.metrics.values()))))),
+                         metric_names=list(self.metrics.keys()),
+                         legend=[True] * len(self.metrics),
+                         figsize=8,
+                         wspace=0.5)

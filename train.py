@@ -48,6 +48,10 @@ def main():
     parser.add_argument('--loss-control-epoch', type=int, nargs='+',
                         help="epoch selected to work with loss-control method, "
                         "one for each loss function")
+    parser.add_argument('--metrics', type=str, nargs='+',
+                        help="selection of metrics you want to calculate")
+    parser.add_argument('--metrics-every', type=int,
+                        help="metrics frequency (by epoch)")
 
     args=parser.parse_args()
 
@@ -90,7 +94,9 @@ def main():
         embedding_dim = args.embedding_dim,
         isolate_d_classifier = args.isolate_d_classifier,
         loss_control=args.loss_control,
-        loss_control_epoch=args.loss_control_epoch
+        loss_control_epoch=args.loss_control_epoch,
+        metrics=args.metrics,
+        metrics_every=args.metrics_every,
     )
 
     if args.resume:
@@ -106,8 +112,7 @@ def main():
     model.main_loop(dataset, samples,
                     samples_conditionals = None,
                     epochs = args.epoch,
-                    batchsize = args.batchsize,
-                    reporter = ['loss', 'g_loss', 'd_loss', 'g_acc', 'd_acc'])
+                    batchsize = args.batchsize)
 
 
 if __name__ == '__main__':

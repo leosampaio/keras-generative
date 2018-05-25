@@ -5,6 +5,9 @@ from pprint import pprint
 
 import numpy as np
 from sklearn.svm import LinearSVC
+from sklearn.svm import SVC, LinearSVC
+from sklearn.model_selection import GridSearchCV, StratifiedShuffleSplit
+from sklearn.preprocessing import StandardScaler
 
 import keras
 from keras.engine.topology import Layer
@@ -450,7 +453,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         # train both networks
         _, _, d_triplet, ae_loss = self.ae_triplet_trainer.train_on_batch(input_data, label_data)
-        _, d_loss, d_triplet, ae_loss = self.dis_trainer.train_on_batch(input_data, label_data)
+        _, d_loss, d_triplet, _ = self.dis_trainer.train_on_batch(input_data, label_data)
         _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
         if self.last_losses['d_loss'] < self.dis_loss_control:
             _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
@@ -520,7 +523,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.f_D, not self.isolate_d_classifier)
         set_trainable(self.aux_classifier, True)
         self.dis_trainer.compile(optimizer=opt_d,
-                                 loss=[loss_d, triplet_d_loss, 'mse'],
+                                 loss=[loss_d, triplet_d_loss, 'binary_crossentropy'],
                                  loss_weights=[self.backend_losses['d_loss'], 0., 0.])
 
         # build autoencoder+triplet
@@ -528,8 +531,8 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
         set_trainable(self.aux_classifier, not self.isolate_d_classifier)
-        self.ae_triplet_trainer.compile(optimizer=RMSprop(lr=self.lr),
-                                        loss=[loss_d, triplet_d_loss, 'mse'],
+        self.ae_triplet_trainer.compile(optimizer=RMSprop(lr=self.lr*1e1),
+                                        loss=[loss_d, triplet_d_loss, 'binary_crossentropy'],
                                         loss_weights=[0., self.backend_losses['d_triplet'], self.backend_losses['ae_loss']])
 
         # build generators
@@ -537,7 +540,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=opt_g,
-                                 loss=[loss_g, triplet_g_loss, 'mse'],
+                                 loss=[loss_g, triplet_g_loss, 'binary_crossentropy'],
                                  loss_weights=[self.backend_losses['g_loss'], self.backend_losses['g_triplet'], 0.])
 
         self.gen_trainer.summary()
@@ -561,7 +564,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
                      iterations_list=list(range(len(self.all_losses['ae_loss']))),
                      metric_names=[('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss'],
                      legend=[True, True, True, True],
-                     figsize=(16, 16),
+                     figsize=8,
                      wspace=0.4)
 
     def save_images(self, samples, filename, conditionals_for_samples=None):
@@ -677,6 +680,45 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         return Model(z_input, x)
 
+    def calculate_svm_eval(self, finished_cgraph_use_event):
+
+        # get shuffled data
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.dataset))
+        x_test, y_test = self.dataset.images[perm[:1000]], np.argmax(self.dataset.attrs[perm[:1000]], axis=1)
+        x_train, y_train = self.dataset.images[perm[1000:]],  np.argmax(self.dataset.attrs[perm[1000:]], axis=1)
+        np.random.seed()
+
+        feats = self.encoder.predict(x_train)
+        feats_test = self.encoder.predict(x_test)
+        finished_cgraph_use_event.set()
+
+        # rescale data
+        scaler = StandardScaler()
+        feats = scaler.fit_transform(feats)
+        feats_test = scaler.transform(feats_test)
+
+        # grid search is performed on those C values
+        param_grid = [{'C': [1e1]}]
+
+        # get 10 stratified shuffle splits of 1000 samples (stratified meaning it
+        # keeps the class distribution intact).
+        dataset_splits = StratifiedShuffleSplit(
+            n_splits=2, train_size=1000, test_size=0.2).split(feats, y_train)
+
+        # perform grid search on each different split and get best linear SVM
+        scores = []
+        for split in dataset_splits:
+            grid = GridSearchCV(LinearSVC(),
+                                param_grid=param_grid,
+                                cv=[split], n_jobs=1)
+            grid.fit(feats, y_train)
+            score_on_test = grid.score(feats_test, y_test)
+            scores.append(score_on_test)
+
+        mean = np.mean(scores)
+        return mean
+
 
 class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
 
@@ -709,7 +751,7 @@ class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
         x = BasicDeconvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
         x = BasicDeconvLayer(128, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
 
-        x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(128, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model(z_input, x)
@@ -719,10 +761,10 @@ class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
 
         x = Activation('relu')(embedding_input)
         x = BatchNormalization()(x)
-        x = Dense(256)(x)
+        x = Dense(512)(x)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
-        x = Dense(256)(x)
+        x = Dense(512)(x)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
         x = Dense(1)(x)
@@ -746,7 +788,7 @@ class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
         x = BasicDeconvLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
         x = BasicDeconvLayer(128, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
 
-        x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
+        x = BasicConvLayer(128, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model(z_input, x)
