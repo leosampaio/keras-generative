@@ -5,6 +5,7 @@ from keras.layers import Activation, ELU, LeakyReLU, Dropout, Lambda
 from keras.layers.merge import _Merge
 from keras import backend as K
 import tensorflow as tf
+from . import mmd
 
 
 class SampleNormal(Layer):
@@ -373,3 +374,23 @@ class RandomWeightedAverage(_Merge):
     def _merge_function(self, inputs):
         weights = K.random_uniform((32, 1, 1, 1))
         return (weights * inputs[0]) + ((1 - weights) * inputs[1])
+
+class MaximumMeanDiscrepancy(Layer):
+    __name__ = 'maximum_mean_discrepancy_layer'
+
+    def __init__(self, **kwargs):
+        super(MaximumMeanDiscrepancy, self).__init__(**kwargs)
+
+    def call(self, inputs):
+        x_true = inputs[0]
+        x_fake = inputs[1]
+        return tf.log(mmd.rbf_mmd2(x_true, x_fake))
+
+    def compute_output_shape(self, input_shape):
+        assert type(input_shape) is list  # must have mutiple input shape tuples
+
+        # all tuples in input_shapes should be the same
+        return (1,)
+
+    def compute_mask(self, inputs, mask=None):
+        return [None, None]

@@ -63,7 +63,7 @@ def main(argv):
     feat_cols = ['feat'+str(i) for i in range(features.shape[1])]
     df = pd.DataFrame(features, columns=feat_cols)
     df['label'] = labels
-    df['label'] = df['label'].apply(lambda i: str(i))  
+    df['label'] = df['label'].apply(lambda i: str(i))
 
     if args.pca:
         pca = PCA(n_components=2)

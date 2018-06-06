@@ -1,19 +1,25 @@
 from keras import backend as K
 from keras.callbacks import Callback
-import os, sys
+import os
+import sys
 import numpy as np
-from matplotlib.gridspec import GridSpec
+from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 from matplotlib.ticker import FormatStrFormatter
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from matplotlib import ticker
+import matplotlib.cm as cm
+from matplotlib.colors import Normalize
+
 
 def set_trainable(model, train):
     """
     Enable or disable training for the model
     """
-    if type(model) != list: mlist = [model]
-    else: mlist = model
+    if type(model) != list:
+        mlist = [model]
+    else:
+        mlist = model
     for model in mlist:
         model.trainable = train
         for l in model.layers:
@@ -47,6 +53,7 @@ def interpolate_vectors(a, b, steps=10):
 
 
 class PlotReconstructions(Callback):
+
     def __init__(self, encoder, decoder, z_dim=256, examples_to_plot=10):
         super().__init__()
         self.encoder = encoder
@@ -123,6 +130,7 @@ def get_gradient_norm_func(model):
     func = K.function(inputs=input_tensors, outputs=[norm])
     return func
 
+
 def time_format(t):
     m, s = divmod(t, 60)
     m = int(m)
@@ -131,6 +139,7 @@ def time_format(t):
         return '%d sec' % s
     else:
         return '%d min %d sec' % (m, s)
+
 
 def print_current_progress(current_epoch, current_batch_index, batch_size, dataset_length, losses, elapsed_time):
     ratio = 100.0 * (current_batch_index + batch_size) / dataset_length
@@ -146,77 +155,88 @@ def print_current_progress(current_epoch, current_batch_index, batch_size, datas
     print(status_string)
     sys.stdout.flush()
 
+
 def add_input_noise(x_batch, curr_epoch, total_epochs, start_noise):
     if start_noise == 0.0:
         return x_batch
 
-    if type(x_batch) == tuple: batchsize = x_batch[0].shape
-    else: batchsize = x_batch.shape
+    if type(x_batch) == tuple:
+        batchsize = x_batch[0].shape
+    else:
+        batchsize = x_batch.shape
     noise = np.random.normal(size=batchsize)
 
     noise_factor = curr_epoch / total_epochs
     if noise_factor < 0.02:
         return x_batch
 
-    if type(x_batch) == tuple: noised_batch = tuple([X + noise * noise_factor for X in x_batch])
-    else: noised_batch = x_batch + noise * noise_factor
+    if type(x_batch) == tuple:
+        noised_batch = tuple([X + noise * noise_factor for X in x_batch])
+    else:
+        noised_batch = x_batch + noise * noise_factor
     return noised_batch
+
 
 def add_input_noise_to_autoencoder(x_batch):
     batchsize = x_batch.shape
     noise = np.random.normal(size=batchsize)
-    return x_batch + noise*0.0
+    return x_batch + noise * 0.0
+
 
 def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
-        if smoothing > 0.0:
-            y_pos = 1. - np.random.random((batchsize, )) * smoothing
-            if one_sided_smoothing:
-                y_neg = np.zeros(batchsize, dtype='float32')
-            else:
-                y_neg = np.random.random((batchsize, )) * smoothing
-        else:
-            y_pos = np.ones(batchsize, dtype='float32')
+    if smoothing > 0.0:
+        y_pos = 1. - np.random.random((batchsize, )) * smoothing
+        if one_sided_smoothing:
             y_neg = np.zeros(batchsize, dtype='float32')
+        else:
+            y_neg = np.random.random((batchsize, )) * smoothing
+    else:
+        y_pos = np.ones(batchsize, dtype='float32')
+        y_neg = np.zeros(batchsize, dtype='float32')
 
-        return y_pos, y_neg
+    return y_pos, y_neg
 
-def plot_metrics(outfile, metrics_list, iterations_list,
-                     metric_names=None, n_cols=2, legend=False, x_label=None,
-                     y_label=None, wspace=None, hspace=None, figsize=8):
-        # cmap=plt.cm.tab20
-        assert isinstance(metrics_list, (list, tuple)) and \
-            not isinstance(metrics_list, str)
 
-        if len(metrics_list) == 1:
-            grid_cols, grid_rows = 1, 1
-        elif len(metrics_list) == 2:
-            grid_cols, grid_rows = 2, 1
-        elif len(metrics_list) == 3 or len(metrics_list) == 4:
-            grid_cols, grid_rows = 2, 2
-        elif len(metrics_list) == 5 or len(metrics_list) == 6:
-            grid_cols, grid_rows = 2, 3
-        elif len(metrics_list) == 7 or len(metrics_list) == 8 or len(metrics_list) == 9:
-            grid_cols, grid_rows = 3, 3
+def plot_metrics(outfile, metrics_list, iterations_list, types,
+                 metric_names=None, n_cols=2, legend=False, x_label=None,
+                 y_label=None, wspace=None, hspace=None, figsize=8):
 
-        fig_w, fig_h = figsize*grid_cols, figsize*grid_cols
+    assert isinstance(metrics_list, (list, tuple)) and \
+        not isinstance(metrics_list, str)
 
-        fig = plt.figure(figsize=(fig_w, fig_h))
+    total_n_plots = len(metrics_list)
+    if total_n_plots == 1:
+        grid_cols, grid_rows = 1, 1
+    elif total_n_plots == 2:
+        grid_cols, grid_rows = 2, 1
+    elif total_n_plots == 3 or total_n_plots == 4:
+        grid_cols, grid_rows = 2, 2
+    elif total_n_plots == 5 or total_n_plots == 6:
+        grid_cols, grid_rows = 2, 3
+    elif total_n_plots == 7 or total_n_plots == 8 or total_n_plots == 9:
+        grid_cols, grid_rows = 3, 3
 
-        gs = GridSpec(grid_rows, grid_cols)
-        if wspace is not None and hspace is not None:
-            gs.update(wspace=wspace, hspace=hspace)
-        elif wspace is not None:
-            gs.update(wspace=wspace)
-        elif hspace is not None:
-            gs.update(hspace=hspace)
+    fig_w, fig_h = figsize * grid_cols, figsize * grid_rows
 
-        for ii, metric in enumerate(metrics_list):
+    fig = plt.figure(figsize=(fig_w, fig_h))
 
-            ax = plt.subplot(gs[ii // grid_cols, ii % grid_cols])
+    gs = GridSpec(grid_rows, grid_cols)
+    if wspace is not None and hspace is not None:
+        gs.update(wspace=wspace, hspace=hspace)
+    elif wspace is not None:
+        gs.update(wspace=wspace)
+    elif hspace is not None:
+        gs.update(hspace=hspace)
 
-            ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+    for ii, metric in enumerate(metrics_list):
 
-            if isinstance(metric[0], (list, tuple)):
+        current_cell = gs[ii // grid_cols, ii % grid_cols]
+        ax = None
+
+        if types[ii] == 'lines':
+            ax = plt.subplot(current_cell)
+            ax.yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+            if isinstance(metric[0], (list, tuple, np.ndarray)):
                 lines = []
                 for jj, submetric in enumerate(metric):
                     if metric_names is not None:
@@ -235,19 +255,46 @@ def plot_metrics(outfile, metrics_list, iterations_list,
                 line, = ax.plot(iterations_list, metric, color='C0',
                                 label=label)
                 lines = [line]
+            if ((not isinstance(legend, (list, tuple)) and legend) or
+                    (isinstance(legend, (list, tuple)) and legend[ii])):
+                lg = ax.legend(handles=lines)
 
-            if (not isinstance(legend, (list, tuple)) and legend) or \
-                    (isinstance(legend, (list, tuple)) and legend[ii]):
-                lg = ax.legend(handles=lines,
-                               bbox_to_anchor=(1.0, 1.0),
-                               loc="upper left")
-                bbox_extra_artists = (lg, )
-            else:
-                bbox_extra_artists = None
+        elif types[ii] == 'scatter':
+            ax = plt.subplot(current_cell)
+            ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+            cmap = cm.tab10
+            category_labels = metric[-1][..., 2]
+            norm = colors.Normalize(vmin=np.min(category_labels), vmax=np.max(category_labels))
+            cmapper = cm.ScalarMappable(norm=norm, cmap=cmap)
+            mapped_colors = cmapper.to_rgba(category_labels)
+            unique_labels = list(set(category_labels))
+            lines = ax.scatter(metric[-1][..., 0], metric[-1][..., 1],
+                               color=mapped_colors,
+                               label=unique_labels)
+            ax.text(0.1, 0.95, metric_names[ii],
+                    horizontalalignment='center',
+                    verticalalignment='center',
+                    transform=ax.transAxes,
+                    fontsize=14)
 
+        elif types[ii] == 'image-grid':
+            imgs = metric[-1]
+            n_images = len(imgs)
+            inner_grid_width = int(np.sqrt(n_images))
+            inner_grid = GridSpecFromSubplotSpec(inner_grid_width, inner_grid_width, current_cell, wspace=0.1, hspace=0.1)
+            for i in range(n_images):
+                inner_ax = plt.subplot(inner_grid[i])
+                if imgs.ndim == 4:
+                    inner_ax.imshow(imgs[i, :, :, :], interpolation='none', vmin=0.0, vmax=1.0)
+                else:
+                    inner_ax.imshow(imgs[i, :, :], cmap='gray', interpolation='none', vmin=0.0, vmax=1.0)
+                inner_ax.axis('off')
+
+        
+        if ax is not None:
             if x_label is not None and not isinstance(x_label, (list, tuple)):
                 ax.set_xlabel(x_label, color='k')
-            elif isinstance(x_label, (list, tuple)):
+            elif isinstance(x_label, (list, tuple)) and ax is not None:
                 ax.set_xlabel(x_label[ii], color='k')
 
             # Make the y-axis label, ticks and tick labels
@@ -258,17 +305,16 @@ def plot_metrics(outfile, metrics_list, iterations_list,
                 ax.set_ylabel(y_label[ii], color='k')
             ax.tick_params('y', colors='k')
 
-        plt.savefig(
-            outfile, dpi=300,
-            bbox_extra_artists=bbox_extra_artists, bbox_inches='tight')
-        plt.close(fig)
+    plt.savefig(outfile, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
 
 def change_losses_weight_over_time(current_epoch, max_epoch, type, scalar_loss):
-    weighting_factor = current_epoch/max_epoch
+    weighting_factor = current_epoch / max_epoch
     if type == 'inc':
-        return scalar_loss*weighting_factor
+        return scalar_loss * weighting_factor
     elif type == 'dec':
-        return scalar_loss*(1-weighting_factor)
+        return scalar_loss * (1 - weighting_factor)
     elif type == 'hold':
         if current_epoch >= max_epoch:
             return scalar_loss
@@ -276,14 +322,14 @@ def change_losses_weight_over_time(current_epoch, max_epoch, type, scalar_loss):
             return 0.0
     elif type == 'hold-inc':
         if current_epoch >= max_epoch:
-            weighting_factor = (current_epoch-max_epoch)/max_epoch
-            return scalar_loss*weighting_factor
+            weighting_factor = (current_epoch - max_epoch) / max_epoch
+            return scalar_loss * weighting_factor
         else:
             return 0.0
     elif type == 'hold-dec':
         if current_epoch >= max_epoch:
-            weighting_factor = (current_epoch-max_epoch)/max_epoch
-            return scalar_loss*(1-weighting_factor)
+            weighting_factor = (current_epoch - max_epoch) / max_epoch
+            return scalar_loss * (1 - weighting_factor)
         else:
             return 0.0
     elif type == 'halt':

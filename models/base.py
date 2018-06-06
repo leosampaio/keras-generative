@@ -74,6 +74,7 @@ class BaseModel(metaclass=ABCMeta):
                 self.metric_calculators = {m: getattr(self, "calculate_{}".format(m)) for m in metrics}
                 self.metrics = {m: [] for m in metrics}
                 self.metrics_calc_threads = {m: threading.Thread() for m in metrics}
+                self.metric_types = {m: getattr(self, "{}_metric_type".format(m)) for m in metrics}
                 for t in self.metrics_calc_threads.values():
                     t.start()
             except AttributeError:
@@ -90,7 +91,7 @@ class BaseModel(metaclass=ABCMeta):
         return self.get_experiment_id()
     experiment_id = property(_get_experiment_id)
 
-    def main_loop(self, dataset, samples, samples_conditionals=None, epochs=100, batchsize=100):
+    def main_loop(self, dataset, samples, epochs=100, batchsize=100):
         '''
         Main learning loop
         '''
@@ -101,19 +102,21 @@ class BaseModel(metaclass=ABCMeta):
         if not os.path.isdir(out_dir):
             os.mkdir(out_dir)
 
-        res_out_dir = os.path.join(out_dir, 'results')
-        if not os.path.isdir(res_out_dir):
-            os.mkdir(res_out_dir)
+        self.res_out_dir = os.path.join(out_dir, 'results')
+        if not os.path.isdir(self.res_out_dir):
+            os.mkdir(self.res_out_dir)
 
-        wgt_out_dir = os.path.join(out_dir, 'weights')
-        if not os.path.isdir(wgt_out_dir):
-            os.mkdir(wgt_out_dir)
+        self.wgt_out_dir = os.path.join(out_dir, 'weights')
+        if not os.path.isdir(self.wgt_out_dir):
+            os.mkdir(self.wgt_out_dir)
 
         # Start training
         print('\n\n--- START TRAINING ---\n')
         num_data = len(dataset)
         self.dataset = dataset
+        self.samples = samples
         self.g_losses, self.d_losses, self.losses_ratio = [], [], []
+        self.make_predict_functions()
         for e in range(self.last_epoch, epochs):
             perm = np.random.permutation(num_data)
             start_time = time.time()
@@ -152,37 +155,12 @@ class BaseModel(metaclass=ABCMeta):
                     return
 
             # plot samples and losses and send notification if it's checkpoint time
-            is_checkpoint = ((self.current_epoch) % self.checkpoint_every) == 0
-            is_notification_checkpoint = ((self.current_epoch) % self.notify_every) == 0
-            is_metrics_checkpoint = ((self.current_epoch) % self.metrics_every) == 0
-            outfile = None
-            if is_checkpoint:
-                outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(self.current_epoch, b + bsize))
-                self.save_images(samples, "{}_samples.png".format(outfile), conditionals_for_samples=samples_conditionals)
-                self.save_model(wgt_out_dir, self.current_epoch)
-                self.plot_losses_hist("{}_losses.png".format(outfile))
-            if is_notification_checkpoint:
-                if not outfile:
-                    outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}".format(self.current_epoch, b + bsize))
-                    self.save_images(samples, "{}_samples.png".format(outfile), conditionals_for_samples=samples_conditionals)
-                    self.plot_losses_hist("{}_losses.png".format(outfile))
-                try:
-                    message = "[{}] Epoch #{:04}".format(self.experiment_id, self.current_epoch)
-                    notify_with_image("{}_samples.png".format(outfile), experiment_id=self.experiment_id, message=message)
-                    notify_with_image("{}_losses.png".format(outfile), experiment_id=self.experiment_id, message=message)
-                except NameError as e:
-                    print(e)
-            if is_metrics_checkpoint:
-                outfile = os.path.join(res_out_dir, "epoch_{:04}_batch_{}_metrics.png".format(self.current_epoch, b + bsize))
-                log_message = self.calculate_all_metrics()
-                self.plot_all_metrics(outfile)
-                print(log_message)
-                try:
-                    message = "[{}] Epoch #{:04}".format(self.experiment_id, self.current_epoch)
-                    notify_with_image(outfile, experiment_id=self.experiment_id, message=message)
-                    notify_with_message(log_message, self.experiment_id)
-                except NameError as e:
-                    print(e)
+            if ((self.current_epoch) % self.checkpoint_every) == 0:
+                self.save_model(self.wgt_out_dir, self.current_epoch)
+            if ((self.current_epoch) % self.notify_every) == 0:
+                self.send_checkpoint_notification()
+            if ((self.current_epoch) % self.metrics_every) == 0:
+                self.send_metrics_notification()
 
             elapsed_time = time.time() - start_time
             print('Took: {}s\n'.format(elapsed_time))
@@ -200,6 +178,13 @@ class BaseModel(metaclass=ABCMeta):
         self.d_losses.append(losses['d_loss'])
         self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
 
+    def make_predict_functions(self):
+        """
+        implement `_make_predict_function()` calls here if you plan on making
+        predictions on multiple threads
+        """
+        pass
+
     def make_batch(self, dataset, indx):
         '''
         Get batch from dataset
@@ -210,32 +195,6 @@ class BaseModel(metaclass=ABCMeta):
 
     def did_collapse(self, losses):
         return False
-
-    def save_images(self, samples, filename, conditionals_for_samples=None):
-        '''
-        Save images generated from random sample numbers
-        '''
-        imgs = self.predict(samples)
-        # imgs = np.clip(imgs * 0.5 + 0.5, 0.0, 1.0)
-        if imgs.shape[3] == 1:
-            imgs = np.squeeze(imgs, axis=(3,))
-
-        self.save_image_as_plot(imgs, filename)
-
-    def save_image_as_plot(self, imgs, filename):
-        fig = plt.figure(figsize=(8, 8))
-        grid = gridspec.GridSpec(10, 10, wspace=0.1, hspace=0.1)
-        for i in range(100):
-            ax = plt.Subplot(fig, grid[i])
-            if imgs.ndim == 4:
-                ax.imshow(imgs[i, :, :, :], interpolation='none', vmin=0.0, vmax=1.0)
-            else:
-                ax.imshow(imgs[i, :, :], cmap='gray', interpolation='none', vmin=0.0, vmax=1.0)
-            ax.axis('off')
-            fig.add_subplot(ax)
-
-        fig.savefig(filename, dpi=200)
-        plt.close(fig)
 
     def save_model(self, out_dir, epoch):
         folder = os.path.join(out_dir, 'epoch_%05d' % epoch)
@@ -284,7 +243,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def predict_images(self, z_sample):
         images = self.predict(z_sample)
-        if images.shape[3] == 1:
+        if images.shape[3] == 1:  
             images = np.squeeze(imgs, axis=(3,))
         # images = np.clip(predictions * 0.5 + 0.5, 0.0, 1.0)
         return images
@@ -305,31 +264,96 @@ class BaseModel(metaclass=ABCMeta):
 
     def calculate_all_metrics(self):
         log_message = "Metrics for Epoch #{}: ".format(np.max((self.current_epoch - self.metrics_every, 1)))
+        self.did_go_through_all_metrics = threading.Event()
         for m, calculation_fun in self.metric_calculators.items():
             self.metrics_calc_threads[m].join()
             if not self.metrics[m]:
                 log_message = "{} {}: {},".format(log_message, m, "waiting")
-            else:
+            elif self.metric_types[m] == 'lines':
                 log_message = "{} {}: {},".format(log_message, m, self.metrics[m][-1])
+            else:
+                log_message = "{} {}: plotted,".format(log_message, m)
             finished_cgraph_use_event = threading.Event()
+            
             self.metrics_calc_threads[m] = threading.Thread(target=self.metrics_calculation_worker,
                                                             args=(calculation_fun, self.metrics[m],
-                                                                  finished_cgraph_use_event))
+                                                                  self.metric_types[m],
+                                                                  finished_cgraph_use_event,
+                                                                  self.did_go_through_all_metrics))
             self.metrics_calc_threads[m].start()
             finished_cgraph_use_event.wait()
         return log_message
 
-    def metrics_calculation_worker(self, calculation_fun, results,
-                                   finished_cgraph_use_event):
+    def metrics_calculation_worker(self, calculation_fun, results, mtype,
+                                   finished_cgraph_use_event, did_go_through_all_metrics):
         result = calculation_fun(finished_cgraph_use_event)
-        results.append(result)
+        # wait for all metrics to finish 
+        # before appending the results
+        did_go_through_all_metrics.wait()
+        if mtype == 'lines':
+            results.append(result)
+        elif mtype == 'scatter' or mtype == 'image-grid':
+            if not results:
+                results.append(result)
+            else:
+                results[-1] = result
+
+    def calculate_samples(self, finished_cgraph_use_event):
+        imgs = self.predict(self.samples)
+        finished_cgraph_use_event.set()
+        if imgs.shape[3] == 1:
+            imgs = np.squeeze(imgs, axis=(3,))
+        return imgs
+    samples_metric_type = 'image-grid'
 
     def plot_all_metrics(self, outfile):
         if all(d for d in self.metrics.values()):
+            e_metrics, e_iters, e_names, e_types, e_legend = self.get_extra_metrics_for_plot()
+            metrics, names = list(self.metrics.values()), list(self.metrics.keys())
+            iters = list(range(self.metrics_every, self.current_epoch, self.metrics_every))
+            types = list(self.metric_types[k] for k in self.metrics.keys())
             plot_metrics(outfile,
-                         metrics_list=list(self.metrics.values()),
-                         iterations_list=list(range(len(next(iter(self.metrics.values()))))),
-                         metric_names=list(self.metrics.keys()),
-                         legend=[True] * len(self.metrics),
+                         metrics_list=metrics+e_metrics,
+                         iterations_list=iters+e_iters,
+                         metric_names=names+e_names,
+                         types=types+e_types,
+                         legend=([True]*len(self.metrics))+e_legend,
                          figsize=8,
-                         wspace=0.5)
+                         wspace=0.15)
+            self.did_go_through_all_metrics.set()
+            return True
+        else:
+            self.did_go_through_all_metrics.set()
+            return False
+
+    def get_extra_metrics_for_plot(self):
+        """
+        should return any metrics you want to plot together with the 
+        frequent ones
+
+        returns 5 lists: 
+            metrics_list, iterations_list, metric_names, metric_types, use_legend_list
+        """
+        return []*5
+
+    def send_checkpoint_notification(self):
+        outfile_signature = os.path.join(self.res_out_dir, "epoch_{:04}".format(self.current_epoch))
+        self.plot_losses_hist("{}_losses.png".format(outfile_signature))
+        try:
+            message = "[{}] Epoch #{:04}".format(self.experiment_id, self.current_epoch)
+            notify_with_image("{}_losses.png".format(outfile_signature), experiment_id=self.experiment_id, message=message)
+        except NameError as e:
+            print(e)
+
+    def send_metrics_notification(self):
+        outfile = os.path.join(self.res_out_dir, "epoch_{:04}_metrics.png".format(self.current_epoch))
+        log_message = self.calculate_all_metrics()
+        did_plot = self.plot_all_metrics(outfile)
+        print(log_message)
+        try:
+            message = "[{}] Epoch #{:04}".format(self.experiment_id, self.current_epoch)
+            notify_with_message(log_message, self.experiment_id)
+            if did_plot:
+                notify_with_image(outfile, experiment_id=self.experiment_id, message=message)
+        except NameError as e:
+            print(e)

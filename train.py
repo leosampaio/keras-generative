@@ -110,7 +110,6 @@ def main():
     # np.random.seed()
 
     model.main_loop(dataset, samples,
-                    samples_conditionals = None,
                     epochs = args.epoch,
                     batchsize = args.batchsize)
 
