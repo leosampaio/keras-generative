@@ -215,6 +215,14 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
         grid_cols, grid_rows = 2, 3
     elif total_n_plots == 7 or total_n_plots == 8 or total_n_plots == 9:
         grid_cols, grid_rows = 3, 3
+    elif total_n_plots == 10 or total_n_plots == 11 or total_n_plots == 12:
+        grid_cols, grid_rows = 3, 4
+    elif total_n_plots == 13 or total_n_plots == 14 or total_n_plots == 15:
+        grid_cols, grid_rows = 3, 5
+    elif total_n_plots == 16:
+        grid_cols, grid_rows = 4, 4
+    elif total_n_plots == 17 or total_n_plots == 18 or total_n_plots == 19 or total_n_plots == 19:
+        grid_cols, grid_rows = 4, 5
 
     fig_w, fig_h = figsize * grid_cols, figsize * grid_rows
 
@@ -243,7 +251,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                         label = metric_names[ii][jj]
                     else:
                         label = "line_%01d" % jj
-                    line, = ax.plot(iterations_list, submetric,
+                    line, = ax.plot(iterations_list[ii], submetric,
                                     color='C%d' % jj,
                                     label=label)
                     lines.append(line)
@@ -252,7 +260,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                     label = metric_names[ii]
                 else:
                     label = "line_01"
-                line, = ax.plot(iterations_list, metric, color='C0',
+                line, = ax.plot(iterations_list[ii], metric, color='C0',
                                 label=label)
                 lines = [line]
             if ((not isinstance(legend, (list, tuple)) and legend) or

@@ -85,10 +85,12 @@ def generator_lossfun(y_true, y_pred):
 
     return q_error + p_error
 
+
 def mmd_lossfun(y_true, y_pred):
     x = K.batch_flatten(y_true)
     x_hat = K.batch_flatten(y_pred)
     return tf.log(mmd.rbf_mmd2(x, x_hat))
+
 
 class TOPGAN(BaseModel, metaclass=ABCMeta):
 
@@ -593,17 +595,17 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         super().save_model(out_dir, epoch)
 
     def plot_losses_hist(self, outfile):
-        plot_metrics(outfile,
-                     metrics_list=[(self.all_losses['g_loss'], self.all_losses['d_loss']),
-                                   self.all_losses['g_triplet'],
-                                   self.all_losses['d_triplet'],
-                                   self.all_losses['ae_loss']],
-                     iterations_list=list(range(len(self.all_losses['ae_loss']))),
-                     metric_names=[('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss'],
-                     legend=[True, True, True, True],
-                     types=['lines'] * 4,
-                     figsize=8,
-                     wspace=0.15)
+        pass
+
+    def get_extra_metrics_for_plot(self):
+        metrics = [(self.all_losses['g_loss'], self.all_losses['d_loss']),
+                   self.all_losses['g_triplet'],
+                   self.all_losses['d_triplet'],
+                   self.all_losses['ae_loss']]
+        iters = [list(range(len(self.all_losses['ae_loss'])))]*4
+        m_names = [('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss']
+        types = ['lines'] * 4
+        return metrics, iters, m_names, types
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -814,6 +816,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         print(mmd)
         return mmd
     mmd_metric_type = 'lines'
+
 
 class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
 

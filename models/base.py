@@ -308,16 +308,16 @@ class BaseModel(metaclass=ABCMeta):
 
     def plot_all_metrics(self, outfile):
         if all(d for d in self.metrics.values()):
-            e_metrics, e_iters, e_names, e_types, e_legend = self.get_extra_metrics_for_plot()
+            e_metrics, e_iters, e_names, e_types = self.get_extra_metrics_for_plot()
             metrics, names = list(self.metrics.values()), list(self.metrics.keys())
-            iters = list(range(self.metrics_every, self.current_epoch, self.metrics_every))
+            iters = [list(range(self.metrics_every, self.current_epoch, self.metrics_every))]*len(self.metrics)
             types = list(self.metric_types[k] for k in self.metrics.keys())
             plot_metrics(outfile,
                          metrics_list=metrics+e_metrics,
                          iterations_list=iters+e_iters,
                          metric_names=names+e_names,
                          types=types+e_types,
-                         legend=([True]*len(self.metrics))+e_legend,
+                         legend=True,
                          figsize=8,
                          wspace=0.15)
             self.did_go_through_all_metrics.set()
@@ -332,18 +332,13 @@ class BaseModel(metaclass=ABCMeta):
         frequent ones
 
         returns 5 lists: 
-            metrics_list, iterations_list, metric_names, metric_types, use_legend_list
+            metrics_list, iterations_list, metric_names, metric_types
         """
-        return []*5
+        return []*4
 
     def send_checkpoint_notification(self):
         outfile_signature = os.path.join(self.res_out_dir, "epoch_{:04}".format(self.current_epoch))
         self.plot_losses_hist("{}_losses.png".format(outfile_signature))
-        try:
-            message = "[{}] Epoch #{:04}".format(self.experiment_id, self.current_epoch)
-            notify_with_image("{}_losses.png".format(outfile_signature), experiment_id=self.experiment_id, message=message)
-        except NameError as e:
-            print(e)
 
     def send_metrics_notification(self):
         outfile = os.path.join(self.res_out_dir, "epoch_{:04}_metrics.png".format(self.current_epoch))
