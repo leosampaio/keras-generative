@@ -422,6 +422,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
             self.loss_control_epoch = dict(list(zip(self.loss_names, [1] * self.n_losses)))
 
         self.last_loss_weights = {l: 0. for l in self.loss_names}
+        self.loss_weights_across_time = {l: [] for l in self.loss_names}
         self.backend_losses = {l: K.variable(0) for l in self.loss_names}
         self.opt_states = None
         self.optimizers = None
@@ -479,6 +480,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         self.last_losses = losses
         for k, v in losses.items():
             self.all_losses[k].append(v)
+            self.loss_weights_across_time[k].append(self.last_loss_weights[k])
         return losses
 
     def did_train_over_an_epoch(self):
@@ -576,7 +578,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr)
         opt_g = Adam(lr=self.lr)
-        opt_ae = Adam(lr=self.lr * 10)
+        opt_ae = RMSprop(lr=self.lr * 10)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
                 "opt_ae": opt_ae}
@@ -601,10 +603,10 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         metrics = [(self.all_losses['g_loss'], self.all_losses['d_loss']),
                    self.all_losses['g_triplet'],
                    self.all_losses['d_triplet'],
-                   self.all_losses['ae_loss']]
-        iters = [list(range(len(self.all_losses['ae_loss'])))]*4
-        m_names = [('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss']
-        types = ['lines'] * 4
+                   self.all_losses['ae_loss'], tuple(self.loss_weights_across_time.values())]
+        iters = [list(range(len(self.all_losses['ae_loss'])))] * len(metrics)
+        m_names = [('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss', tuple(self.loss_weights_across_time.keys())]
+        types = ['lines'] * len(metrics)
         return metrics, iters, m_names, types
 
     def build_encoder(self):

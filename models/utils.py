@@ -10,6 +10,7 @@ import matplotlib.colors as colors
 from matplotlib import ticker
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize
+import matplotlib.patches as mpatches
 
 
 def set_trainable(model, train):
@@ -265,7 +266,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                 lines = [line]
             if ((not isinstance(legend, (list, tuple)) and legend) or
                     (isinstance(legend, (list, tuple)) and legend[ii])):
-                lg = ax.legend(handles=lines)
+                lg = ax.legend(handles=lines, prop={'size': 16})
 
         elif types[ii] == 'scatter':
             ax = plt.subplot(current_cell)
@@ -279,11 +280,8 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
             lines = ax.scatter(metric[-1][..., 0], metric[-1][..., 1],
                                color=mapped_colors,
                                label=unique_labels)
-            ax.text(0.1, 0.95, metric_names[ii],
-                    horizontalalignment='center',
-                    verticalalignment='center',
-                    transform=ax.transAxes,
-                    fontsize=14)
+            patch = mpatches.Patch(color='silver', label=metric_names[ii])
+            ax.legend(handles=[patch], prop={'size': 20})
 
         elif types[ii] == 'image-grid':
             imgs = metric[-1]
