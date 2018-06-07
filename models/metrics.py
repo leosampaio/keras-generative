@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod
 from pprint import pprint
 
 import numpy as np
-from sklearn.svm import LinearSVC
+from sklearn.svm import LinearSVC, SVC
 from sklearn.model_selection import GridSearchCV, StratifiedShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
@@ -47,6 +47,34 @@ def svm_eval(x_train, y_train, x_test, y_test):
         scores = []
         for split in dataset_splits:
             grid = GridSearchCV(LinearSVC(),
+                                param_grid=param_grid,
+                                cv=[split])
+            grid.fit(x_train, y_train)
+            score_on_test = grid.score(x_test, y_test)
+            scores.append(score_on_test)
+
+        mean = np.mean(scores)
+        return mean
+
+def svm_rbf_eval(x_train, y_train, x_test, y_test):
+
+        # rescale data
+        scaler = StandardScaler()
+        x_train = scaler.fit_transform(x_train)
+        x_test = scaler.transform(x_test)
+
+        # grid search is performed on those C values
+        param_grid = [{'C': [1e1], 'kernel': ['rbf']}]
+
+        # get 10 stratified shuffle splits of 1000 samples (stratified meaning it
+        # keeps the class distribution intact).
+        dataset_splits = StratifiedShuffleSplit(
+            n_splits=2, train_size=1000, test_size=0.2).split(x_train, y_train)
+
+        # perform grid search on each different split and get best linear SVM
+        scores = []
+        for split in dataset_splits:
+            grid = GridSearchCV(SVC(),
                                 param_grid=param_grid,
                                 cv=[split])
             grid.fit(x_train, y_train)

@@ -29,6 +29,7 @@ from .utils import *
 from .layers import *
 from .metrics import *
 from . import mmd
+from . import inception_score
 
 try:
     from .notifyier import *
@@ -574,6 +575,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         self.store_to_save('f_D')
 
         self.build_mmd_calc_model()
+        self.build_inception_eval_model()
 
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr)
@@ -684,7 +686,6 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         self.aux_classifier._make_predict_function()
         self.f_D._make_predict_function()
         self.f_Gx._make_predict_function()
-        self.mmd_model._make_test_function()
 
     def build_Gx(self):
         z_input = Input(shape=(self.z_dims,))
@@ -714,8 +715,20 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         x_hat = self.f_Gx(input_z)
 
-        self.mmd_model = Model(input_z, x_hat)
-        self.mmd_model.compile(optimizer='sgd', loss=mmd_lossfun)
+        self.evaluation_model = Model(input_z, x_hat)
+        self.evaluation_model.compile(optimizer='sgd', loss=mmd_lossfun)
+        self.evaluation_model._make_test_function()
+
+    def build_inception_eval_model(self):
+        input_z = Input(shape=(self.z_dims,))
+
+        x_hat = self.f_Gx(input_z)
+
+        if self.input_shape[2] == 1:
+            x_hat = Lambda(lambda x: tf.image.grayscale_to_rgb(x))(x_hat)
+
+        self.inception_eval_Gx = Model(input_z, x_hat)
+        self.inception_eval_Gx._make_predict_function()
 
     """
         Define all metrics that can be calculated here
@@ -735,6 +748,21 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         return svm_eval(feats, y_train, feats_test, y_test)
     svm_eval_metric_type = 'lines'
+
+    def calculate_svm_rbf_eval(self, finished_cgraph_use_event):
+
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.dataset))
+        x_test, y_test = self.dataset.images[perm[:1000]], np.argmax(self.dataset.attrs[perm[:1000]], axis=1)
+        x_train, y_train = self.dataset.images[perm[1000:6000]],  np.argmax(self.dataset.attrs[perm[1000:6000]], axis=1)
+        np.random.seed()
+
+        feats = self.encoder.predict(x_train)
+        feats_test = self.encoder.predict(x_test)
+        finished_cgraph_use_event.set()
+
+        return svm_rbf_eval(feats, y_train, feats_test, y_test)
+    svm_rbf_eval_metric_type = 'lines'
 
     def calculate_tsne(self, finished_cgraph_use_event):
 
@@ -813,11 +841,38 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         np.random.seed()
 
         imgs_from_dataset = self.dataset.images[perm[:5000]]
-        mmd = self.mmd_model.evaluate(samples, imgs_from_dataset, verbose=0, batch_size=5000)
+        mmd = self.evaluation_model.evaluate(samples, imgs_from_dataset, verbose=0, batch_size=512)
         finished_cgraph_use_event.set()
-        print(mmd)
         return mmd
     mmd_metric_type = 'lines'
+
+    def calculate_inception_score(self, finished_cgraph_use_event):
+        np.random.seed(14)
+        samples = np.random.normal(size=(10000, self.z_dims))
+        np.random.seed()
+
+        generated_images = self.inception_eval_Gx.predict(samples, batch_size=512)
+        generated_images = (generated_images*255)
+        finished_cgraph_use_event.set()
+
+        mean, std = inception_score.get_inception_score(generated_images)
+        return mean
+    inception_score_metric_type = 'lines'
+
+    def _define_inception_score_server(self):
+        cluster = tf.train.ClusterSpec({"local": ["localhost:2222", "localhost:2223"]})
+    def calculate_s_inception_score(self, finished_cgraph_use_event):
+        np.random.seed(14)
+        samples = np.random.normal(size=(10000, self.z_dims))
+        np.random.seed()
+
+        generated_images = self.inception_eval_Gx.predict(samples, batch_size=512)
+        generated_images = (generated_images*255)
+        finished_cgraph_use_event.set()
+
+        mean, std = inception_score.get_inception_score(generated_images)
+        return mean
+    inception_score_metric_type = 'lines'
 
 
 class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):

@@ -237,8 +237,10 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
     elif hspace is not None:
         gs.update(hspace=hspace)
 
-    for ii, metric in enumerate(metrics_list):
+    argsort_of_metric_names = np.argsort(metric_names) # keeps order between runs
+    for ii in argsort_of_metric_names:
 
+        metric = metrics_list[ii]
         current_cell = gs[ii // grid_cols, ii % grid_cols]
         ax = None
 
@@ -316,7 +318,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
 
 
 def change_losses_weight_over_time(current_epoch, max_epoch, type, scalar_loss):
-    weighting_factor = current_epoch / max_epoch
+    weighting_factor = np.min((1, (current_epoch) / max_epoch))
     if type == 'inc':
         return scalar_loss * weighting_factor
     elif type == 'dec':
@@ -328,13 +330,13 @@ def change_losses_weight_over_time(current_epoch, max_epoch, type, scalar_loss):
             return 0.0
     elif type == 'hold-inc':
         if current_epoch >= max_epoch:
-            weighting_factor = (current_epoch - max_epoch) / max_epoch
+            weighting_factor = np.min((1, (current_epoch - max_epoch) / max_epoch))
             return scalar_loss * weighting_factor
         else:
             return 0.0
     elif type == 'hold-dec':
         if current_epoch >= max_epoch:
-            weighting_factor = (current_epoch - max_epoch) / max_epoch
+            weighting_factor = np.min((1, (current_epoch - max_epoch) / max_epoch))
             return scalar_loss * (1 - weighting_factor)
         else:
             return 0.0
