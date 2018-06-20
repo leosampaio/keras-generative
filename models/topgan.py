@@ -19,6 +19,7 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
                           LocallyConnected2D, Add,
                           Lambda, AveragePooling1D, GlobalAveragePooling2D)
 from keras.optimizers import Adam, Adadelta, RMSprop
+from keras import regularizers
 from keras import initializers
 from keras import backend as K
 from keras.applications.mobilenet import MobileNet
@@ -30,6 +31,7 @@ from .layers import *
 from .metrics import *
 from . import mmd
 from . import inception_score
+from . import server
 
 try:
     from .notifyier import *
@@ -459,7 +461,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
 
         if self.input_noise > 1e-5:
-            noise = np.random.normal(scale=0.1, size=x_data.shape)
+            noise = np.random.normal(scale=self.input_noise, size=x_data.shape)
         else:
             noise = np.zeros(x_data.shape)
 
@@ -513,9 +515,11 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         assert self.f_D is not None
 
-        x_noisy = Add()([input_x, input_noise])
+        clipping_layer = Lambda(lambda x: K.clip(x, 0., 1.))
+        
+        x_noisy = clipping_layer(Add()([input_x, input_noise]))
         x_hat = self.f_Gx(input_z)
-        x_hat_noisy = Add()([x_hat, input_noise])
+        x_hat_noisy = clipping_layer(Add()([x_hat, input_noise]))
 
         negative_embedding, p, _ = self.f_D(x_hat_noisy)
         anchor_embedding, q, x_reconstructed = self.f_D(x_noisy)
@@ -547,7 +551,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.f_D, not self.isolate_d_classifier)
         set_trainable(self.aux_classifier, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
-                                 loss=[loss_d, triplet_d_loss, 'binary_crossentropy'],
+                                 loss=[loss_d, triplet_d_loss, 'mse'],
                                  loss_weights=[self.backend_losses['d_loss'], 0., 0.])
 
         # build autoencoder+triplet
@@ -556,7 +560,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.f_D, True)
         set_trainable(self.aux_classifier, not self.isolate_d_classifier)
         self.ae_triplet_trainer.compile(optimizer=self.optimizers["opt_ae"],
-                                        loss=[loss_d, triplet_d_loss, 'binary_crossentropy'],
+                                        loss=[loss_d, triplet_d_loss, 'mse'],
                                         loss_weights=[0., self.backend_losses['d_triplet'], self.backend_losses['ae_loss']])
 
         # build generators
@@ -564,7 +568,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
-                                 loss=[loss_g, triplet_g_loss, 'binary_crossentropy'],
+                                 loss=[loss_g, triplet_g_loss, 'mse'],
                                  loss_weights=[self.backend_losses['g_loss'], self.backend_losses['g_triplet'], 0.])
 
         self.gen_trainer.summary()
@@ -580,7 +584,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr)
         opt_g = Adam(lr=self.lr)
-        opt_ae = RMSprop(lr=self.lr * 10)
+        opt_ae = RMSprop(lr=self.lr)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
                 "opt_ae": opt_ae}
@@ -711,13 +715,14 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         return Model(z_input, x)
 
     def build_mmd_calc_model(self):
-        input_z = Input(shape=(self.z_dims,))
 
-        x_hat = self.f_Gx(input_z)
-
-        self.evaluation_model = Model(input_z, x_hat)
-        self.evaluation_model.compile(optimizer='sgd', loss=mmd_lossfun)
-        self.evaluation_model._make_test_function()
+        x_ph = tf.placeholder(tf.float32, shape=[None] + list(self.input_shape), name='mmd_x')
+        x_hat_ph = tf.placeholder(tf.float32, shape=[None, self.input_shape[0], self.input_shape[1], 3], name='mmd_x_hat')
+        if self.input_shape[2] == 1:
+            x_ph = tf.image.grayscale_to_rgb(x_ph)
+        x_flat = K.batch_flatten(x_ph)
+        x_hat_flat = K.batch_flatten(x_hat_ph)
+        self.mmd_computer = tf.log(mmd.rbf_mmd2(x_flat, x_hat_flat))
 
     def build_inception_eval_model(self):
         input_z = Input(shape=(self.z_dims,))
@@ -734,73 +739,74 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         Define all metrics that can be calculated here
     """
 
-    def calculate_svm_eval(self, finished_cgraph_use_event):
-
+    def save_embedding_features(self, n=10000):
         np.random.seed(14)
         perm = np.random.permutation(len(self.dataset))
-        x_test, y_test = self.dataset.images[perm[:1000]], np.argmax(self.dataset.attrs[perm[:1000]], axis=1)
-        x_train, y_train = self.dataset.images[perm[1000:6000]],  np.argmax(self.dataset.attrs[perm[1000:6000]], axis=1)
+        x_data, y_labels = self.dataset.images[perm[:10000]], np.argmax(self.dataset.attrs[perm[:10000]], axis=1)
+        np.random.seed()
+        x_feats = self.encoder.predict(x_data, batch_size=2000)
+        self.save_precalculated_features('embedding{}'.format(n), x_feats, Y=y_labels)
+        return x_feats, y_labels
+
+    def save_generated_images(self, n=10000):
+        np.random.seed(14)
+        samples = np.random.normal(size=(n, self.z_dims))
         np.random.seed()
 
-        feats = self.encoder.predict(x_train)
-        feats_test = self.encoder.predict(x_test)
+        generated_images = self.inception_eval_Gx.predict(samples, batch_size=2000)
+        generated_images = (generated_images*255)
+
+        self.save_precalculated_features('samples{}'.format(n), generated_images)
+        return generated_images
+
+    def calculate_svm_eval(self, finished_cgraph_use_event):
+
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        if not isinstance(x_feats, np.ndarray):
+            x_feats, y_labels = self.save_embedding_features(n=10000)
         finished_cgraph_use_event.set()
 
-        return svm_eval(feats, y_train, feats_test, y_test)
+        return svm_eval(x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000])
     svm_eval_metric_type = 'lines'
 
     def calculate_svm_rbf_eval(self, finished_cgraph_use_event):
 
-        np.random.seed(14)
-        perm = np.random.permutation(len(self.dataset))
-        x_test, y_test = self.dataset.images[perm[:1000]], np.argmax(self.dataset.attrs[perm[:1000]], axis=1)
-        x_train, y_train = self.dataset.images[perm[1000:6000]],  np.argmax(self.dataset.attrs[perm[1000:6000]], axis=1)
-        np.random.seed()
-
-        feats = self.encoder.predict(x_train)
-        feats_test = self.encoder.predict(x_test)
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        if not isinstance(x_feats, np.ndarray):
+            x_feats, y_labels = self.save_embedding_features(n=10000)
         finished_cgraph_use_event.set()
 
-        return svm_rbf_eval(feats, y_train, feats_test, y_test)
+        return svm_rbf_eval(x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000])
     svm_rbf_eval_metric_type = 'lines'
 
     def calculate_tsne(self, finished_cgraph_use_event):
 
-        np.random.seed(14)
-        perm = np.random.permutation(len(self.dataset))
-        x_test, y_test = self.dataset.images[perm[:1000]], np.argmax(self.dataset.attrs[perm[:1000]], axis=1)
-        np.random.seed()
-
-        feats_test = self.encoder.predict(x_test)
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        if not isinstance(x_feats, np.ndarray):
+            x_feats, y_labels = self.save_embedding_features(n=10000)
         finished_cgraph_use_event.set()
 
-        return tsne(feats_test, y_test)
+        return tsne(x_feats[:1000], y_labels[:1000])
     tsne_metric_type = 'scatter'
 
     def calculate_lda(self, finished_cgraph_use_event):
 
-        np.random.seed(14)
-        perm = np.random.permutation(len(self.dataset))
-        x_test, y_test = self.dataset.images[perm[:1000]], np.argmax(self.dataset.attrs[perm[:1000]], axis=1)
-        np.random.seed()
-
-        feats_test = self.encoder.predict(x_test)
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        if not isinstance(x_feats, np.ndarray):
+            x_feats, y_labels = self.save_embedding_features(n=10000)
         finished_cgraph_use_event.set()
 
-        return lda(feats_test, y_test)
+        return lda(x_feats[:1000], y_labels[:1000])
     lda_metric_type = 'scatter'
 
     def calculate_pca(self, finished_cgraph_use_event):
 
-        np.random.seed(14)
-        perm = np.random.permutation(len(self.dataset))
-        x_test, y_test = self.dataset.images[perm[:1000]], np.argmax(self.dataset.attrs[perm[:1000]], axis=1)
-        np.random.seed()
-
-        feats_test = self.encoder.predict(x_test)
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        if not isinstance(x_feats, np.ndarray):
+            x_feats, y_labels = self.save_embedding_features(n=10000)
         finished_cgraph_use_event.set()
 
-        return pca(feats_test, y_test)
+        return pca(x_feats[:1000], y_labels[:1000])
     pca_metric_type = 'scatter'
 
     def calculate_samples(self, finished_cgraph_use_event):
@@ -818,7 +824,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         np.random.seed(14)
         perm = np.random.permutation(len(self.dataset))
         imgs_from_dataset = self.dataset.images[perm[:18]]
-        noise = np.random.normal(scale=0.1, size=imgs_from_dataset.shape)
+        noise = np.random.normal(scale=self.input_noise, size=imgs_from_dataset.shape)
         imgs_from_dataset += noise
         np.random.seed()
 
@@ -835,44 +841,42 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
     ae_rec_metric_type = 'image-grid'
 
     def calculate_mmd(self, finished_cgraph_use_event):
+        x_hat = self.load_precalculated_features_if_they_exist('samples10000', has_labels=False)
+        if not isinstance(x_hat, np.ndarray):
+            x_hat = self.save_generated_images(n=10000)
+        finished_cgraph_use_event.set()
+
         np.random.seed(14)
         perm = np.random.permutation(len(self.dataset))
-        samples = np.random.normal(size=(5000, self.z_dims))
         np.random.seed()
 
-        imgs_from_dataset = self.dataset.images[perm[:5000]]
-        mmd = self.evaluation_model.evaluate(samples, imgs_from_dataset, verbose=0, batch_size=512)
-        finished_cgraph_use_event.set()
+        imgs_from_dataset = self.dataset.images[perm[:10000]]
+        mmd = K.get_session().run(self.mmd_computer, feed_dict={'mmd_x:0': imgs_from_dataset, 'mmd_x_hat:0': x_hat})
+        
         return mmd
     mmd_metric_type = 'lines'
 
     def calculate_inception_score(self, finished_cgraph_use_event):
-        np.random.seed(14)
-        samples = np.random.normal(size=(10000, self.z_dims))
-        np.random.seed()
-
-        generated_images = self.inception_eval_Gx.predict(samples, batch_size=512)
-        generated_images = (generated_images*255)
+        x_hat = self.load_precalculated_features_if_they_exist('samples10000', has_labels=False)
+        if not isinstance(x_hat, np.ndarray):
+            x_hat = self.save_generated_images(n=10000)
         finished_cgraph_use_event.set()
 
-        mean, std = inception_score.get_inception_score(generated_images)
+        mean, std = inception_score.get_inception_score(x_hat)
         return mean
     inception_score_metric_type = 'lines'
 
-    def _define_inception_score_server(self):
-        cluster = tf.train.ClusterSpec({"local": ["localhost:2222", "localhost:2223"]})
     def calculate_s_inception_score(self, finished_cgraph_use_event):
-        np.random.seed(14)
-        samples = np.random.normal(size=(10000, self.z_dims))
-        np.random.seed()
-
-        generated_images = self.inception_eval_Gx.predict(samples, batch_size=512)
-        generated_images = (generated_images*255)
+        filename = os.path.join(
+            self.tmp_out_dir,
+            "precalculated_features_{}_e{}.h5".format('samples10000', self.current_epoch))
+        if not os.path.exists(filename):
+            _ = self.save_generated_images(n=10000)
         finished_cgraph_use_event.set()
 
-        mean, std = inception_score.get_inception_score(generated_images)
+        mean, std = server.ask_server_for_inception_score(filename)
         return mean
-    inception_score_metric_type = 'lines'
+    s_inception_score_metric_type = 'lines'
 
 
 class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):

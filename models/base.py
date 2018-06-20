@@ -4,6 +4,7 @@ import time
 import threading
 import queue
 import numpy as np
+import h5py
 
 import matplotlib
 
@@ -110,11 +111,15 @@ class BaseModel(metaclass=ABCMeta):
         if not os.path.isdir(self.wgt_out_dir):
             os.mkdir(self.wgt_out_dir)
 
+        self.tmp_out_dir = os.path.join(out_dir, 'tmp')
+        if not os.path.isdir(self.tmp_out_dir):
+            os.mkdir(self.tmp_out_dir)
+
         # Start training
         print('\n\n--- START TRAINING ---\n')
         num_data = len(dataset)
-        self.dataset = dataset
         self.samples = samples
+        self.batchsize = batchsize
         self.g_losses, self.d_losses, self.losses_ratio = [], [], []
         self.make_predict_functions()
         for e in range(self.last_epoch, epochs):
@@ -243,7 +248,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def predict_images(self, z_sample):
         images = self.predict(z_sample)
-        if images.shape[3] == 1:  
+        if images.shape[3] == 1:
             images = np.squeeze(imgs, axis=(3,))
         # images = np.clip(predictions * 0.5 + 0.5, 0.0, 1.0)
         return images
@@ -274,7 +279,7 @@ class BaseModel(metaclass=ABCMeta):
             else:
                 log_message = "{} {}: plotted,".format(log_message, m)
             finished_cgraph_use_event = threading.Event()
-            
+
             self.metrics_calc_threads[m] = threading.Thread(target=self.metrics_calculation_worker,
                                                             args=(calculation_fun, self.metrics[m],
                                                                   self.metric_types[m],
@@ -286,8 +291,16 @@ class BaseModel(metaclass=ABCMeta):
 
     def metrics_calculation_worker(self, calculation_fun, results, mtype,
                                    finished_cgraph_use_event, did_go_through_all_metrics):
-        result = calculation_fun(finished_cgraph_use_event)
-        # wait for all metrics to finish 
+        try:
+            result = calculation_fun(finished_cgraph_use_event)
+        except Exception as e:
+            print("Exception while computing metrics: {}".format(repr(e)))
+            if mtype == 'lines':
+                if not results:
+                    result = 0
+                else:
+                    result = results[-1]
+        # wait for all metrics to finish
         # before appending the results
         did_go_through_all_metrics.wait()
         if mtype == 'lines':
@@ -310,13 +323,13 @@ class BaseModel(metaclass=ABCMeta):
         if all(d for d in self.metrics.values()):
             e_metrics, e_iters, e_names, e_types = self.get_extra_metrics_for_plot()
             metrics, names = list(self.metrics.values()), list(self.metrics.keys())
-            iters = [list(range(self.metrics_every, self.current_epoch, self.metrics_every))]*len(self.metrics)
+            iters = [list(range(self.metrics_every, self.current_epoch, self.metrics_every))] * len(self.metrics)
             types = list(self.metric_types[k] for k in self.metrics.keys())
             plot_metrics(outfile,
-                         metrics_list=metrics+e_metrics,
-                         iterations_list=iters+e_iters,
-                         metric_names=names+e_names,
-                         types=types+e_types,
+                         metrics_list=metrics + e_metrics,
+                         iterations_list=iters + e_iters,
+                         metric_names=names + e_names,
+                         types=types + e_types,
                          legend=True,
                          figsize=8,
                          wspace=0.15)
@@ -334,7 +347,36 @@ class BaseModel(metaclass=ABCMeta):
         returns 5 lists: 
             metrics_list, iterations_list, metric_names, metric_types
         """
-        return []*4
+        return [] * 4
+
+    def load_precalculated_features_if_they_exist(self, feature_type, has_labels=True):
+        filename = os.path.join(
+            self.tmp_out_dir,
+            "precalculated_features_{}_e{}.h5".format(feature_type, self.current_epoch))
+        if os.path.exists(filename):
+            with h5py.File(filename, 'r') as hf:
+                x = hf['feats'][:]
+                if has_labels:
+                    y = hf['labels'][:]
+                    return x, y
+                else:
+                    return x
+        else:
+            if has_labels:
+                return False, False
+            else:
+                return False
+
+    def save_precalculated_features(self, feature_type, X, Y=None):
+        start = time.time()
+        filename = os.path.join(
+            self.tmp_out_dir,
+            "precalculated_features_{}_e{}.h5".format(feature_type, self.current_epoch))
+        with h5py.File(filename, 'w') as hf:
+            hf.create_dataset("feats",  data=X)
+            if Y is not None:
+                hf.create_dataset("labels",  data=Y)
+        print("[Precalc] Saving {} took {}s".format(feature_type, time.time() - start))
 
     def send_checkpoint_notification(self):
         outfile_signature = os.path.join(self.res_out_dir, "epoch_{:04}".format(self.current_epoch))

@@ -237,7 +237,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
     elif hspace is not None:
         gs.update(hspace=hspace)
 
-    argsort_of_metric_names = np.argsort(metric_names) # keeps order between runs
+    argsort_of_metric_names = np.argsort([m[0] if isinstance(m, (list, tuple)) else m for m in metric_names]) # keeps order between runs
     for ii in argsort_of_metric_names:
 
         metric = metrics_list[ii]

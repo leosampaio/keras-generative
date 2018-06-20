@@ -41,7 +41,7 @@ def svm_eval(x_train, y_train, x_test, y_test):
         # get 10 stratified shuffle splits of 1000 samples (stratified meaning it
         # keeps the class distribution intact).
         dataset_splits = StratifiedShuffleSplit(
-            n_splits=2, train_size=1000, test_size=0.2).split(x_train, y_train)
+            n_splits=5, train_size=1000, test_size=0.2).split(x_train, y_train)
 
         # perform grid search on each different split and get best linear SVM
         scores = []
@@ -69,7 +69,7 @@ def svm_rbf_eval(x_train, y_train, x_test, y_test):
         # get 10 stratified shuffle splits of 1000 samples (stratified meaning it
         # keeps the class distribution intact).
         dataset_splits = StratifiedShuffleSplit(
-            n_splits=2, train_size=1000, test_size=0.2).split(x_train, y_train)
+            n_splits=5, train_size=1000, test_size=0.2).split(x_train, y_train)
 
         # perform grid search on each different split and get best linear SVM
         scores = []
