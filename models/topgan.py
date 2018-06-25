@@ -720,7 +720,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         x_ph = tf.placeholder(tf.float32, shape=[None] + list(self.input_shape), name='mmd_x')
         x_hat_ph = tf.placeholder(tf.float32, shape=[None, self.input_shape[0], self.input_shape[1], 3], name='mmd_x_hat')
         if self.input_shape[2] == 1:
-            x_ph = (tf.image.grayscale_to_rgb(x_ph))*255.
+            x_ph = tf.image.grayscale_to_rgb(x_ph)
         x_flat = K.batch_flatten(x_ph)
         x_hat_flat = K.batch_flatten(x_hat_ph)
         self.mmd_computer = tf.log(mmd.rbf_mmd2(x_flat, x_hat_flat))
@@ -851,7 +851,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         perm = np.random.permutation(len(self.dataset))
         np.random.seed()
 
-        imgs_from_dataset = self.dataset.images[perm[:10000]]
+        imgs_from_dataset = self.dataset.images[perm[:10000]]*255.
         mmd = K.get_session().run(self.mmd_computer, feed_dict={'mmd_x:0': imgs_from_dataset, 'mmd_x_hat:0': x_hat})
         
         return mmd

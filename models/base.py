@@ -92,7 +92,7 @@ class BaseModel(metaclass=ABCMeta):
         return self.get_experiment_id()
     experiment_id = property(_get_experiment_id)
 
-    def main_loop(self, dataset, samples, epochs=100, batchsize=100):
+    def main_loop(self, dataset, epochs=100, batchsize=100):
         '''
         Main learning loop
         '''
@@ -118,7 +118,6 @@ class BaseModel(metaclass=ABCMeta):
         # Start training
         print('\n\n--- START TRAINING ---\n')
         num_data = len(dataset)
-        self.samples = samples
         self.batchsize = batchsize
         self.g_losses, self.d_losses, self.losses_ratio = [], [], []
         self.make_predict_functions()
