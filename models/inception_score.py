@@ -54,9 +54,9 @@ def inception_logits(batch, num_splits=1):
     return logits
 
 
-def get_inception_probs(images, graph, sess, batch_size=128, gpu_id='0'):
+def get_inception_probs(images, graph, sess, batch_size=64, gpu_id='0'):
     ds_images = (tf.data.Dataset.from_tensor_slices((images))
-                 .shuffle(1024)
+                 .shuffle(512)
                  .apply(tf.contrib.data.batch_and_drop_remainder(batch_size)))
 
     ds_images_iterator = ds_images.make_initializable_iterator()
@@ -90,10 +90,10 @@ def compute_score(logits):
     return tf.exp(kl)
 
 
-def logits2score(logits, graph, sess, batch_size=256, gpu_id='0'):
+def logits2score(logits, graph, sess, batch_size=128, gpu_id='0'):
     ds_logits = \
         tf.data.Dataset.from_tensor_slices((logits)) \
-        .shuffle(1024) \
+        .shuffle(512) \
         .apply(tf.contrib.data.batch_and_drop_remainder(batch_size))
 
     ds_logits_iterator = ds_logits.make_initializable_iterator()

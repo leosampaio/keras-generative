@@ -470,8 +470,8 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         label_data = [y, y, x_data]
 
         # train both networks
-        _, _, d_triplet, ae_loss = self.ae_triplet_trainer.train_on_batch(input_data, label_data)
-        _, d_loss, d_triplet, _ = self.dis_trainer.train_on_batch(input_data, label_data)
+        # _, _, d_triplet, ae_loss = self.ae_triplet_trainer.train_on_batch(input_data, label_data)
+        _, d_loss, d_triplet, ae_loss = self.dis_trainer.train_on_batch(input_data, label_data)
         _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
         if self.last_losses['d_loss'] < self.dis_loss_control:
             _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
@@ -519,11 +519,11 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         
         x_noisy = clipping_layer(Add()([input_x, input_noise]))
         x_hat = self.f_Gx(input_z)
-        x_hat_noisy = clipping_layer(Add()([x_hat, input_noise]))
 
-        negative_embedding, p, _ = self.f_D(x_hat_noisy)
-        anchor_embedding, q, x_reconstructed = self.f_D(x_noisy)
+        negative_embedding, p, _ = self.f_D(x_hat)
+        anchor_embedding, q, _ = self.f_D(input_x)
         positive_embedding = Lambda(lambda x: K.squeeze(K.gather(anchor_embedding, input_x_perm), 1))(anchor_embedding)
+        _, _, x_reconstructed = self.f_D(x_noisy)
 
         input = [input_x, input_noise, input_x_perm, input_z]
 
@@ -531,6 +531,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         concatenated_triplet = Concatenate(axis=-1, name="triplet")([anchor_embedding, positive_embedding, negative_embedding])
         output = [concatenated_dis, concatenated_triplet, x_reconstructed]
         return Model(input, output, name='topgan')
+
 
     def build_model(self):
 
@@ -552,16 +553,16 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.aux_classifier, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
                                  loss=[loss_d, triplet_d_loss, 'mse'],
-                                 loss_weights=[self.backend_losses['d_loss'], 0., 0.])
+                                 loss_weights=[self.backend_losses['d_loss'], self.backend_losses['d_triplet'], self.backend_losses['ae_loss']])
 
         # build autoencoder+triplet
-        self.ae_triplet_trainer = self.build_trainer()
-        set_trainable(self.f_Gx, False)
-        set_trainable(self.f_D, True)
-        set_trainable(self.aux_classifier, not self.isolate_d_classifier)
-        self.ae_triplet_trainer.compile(optimizer=self.optimizers["opt_ae"],
-                                        loss=[loss_d, triplet_d_loss, 'mse'],
-                                        loss_weights=[0., self.backend_losses['d_triplet'], self.backend_losses['ae_loss']])
+        # self.ae_triplet_trainer = self.build_trainer()
+        # set_trainable(self.f_Gx, False)
+        # set_trainable(self.f_D, True)
+        # set_trainable(self.aux_classifier, not self.isolate_d_classifier)
+        # self.ae_triplet_trainer.compile(optimizer=self.optimizers["opt_ae"],
+        #                                 loss=[loss_d, triplet_d_loss, 'mse'],
+        #                                 loss_weights=[0., self.backend_losses['d_triplet'], self.backend_losses['ae_loss']])
 
         # build generators
         self.gen_trainer = self.build_trainer()
@@ -719,7 +720,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         x_ph = tf.placeholder(tf.float32, shape=[None] + list(self.input_shape), name='mmd_x')
         x_hat_ph = tf.placeholder(tf.float32, shape=[None, self.input_shape[0], self.input_shape[1], 3], name='mmd_x_hat')
         if self.input_shape[2] == 1:
-            x_ph = tf.image.grayscale_to_rgb(x_ph)
+            x_ph = (tf.image.grayscale_to_rgb(x_ph))*255.
         x_flat = K.batch_flatten(x_ph)
         x_hat_flat = K.batch_flatten(x_hat_ph)
         self.mmd_computer = tf.log(mmd.rbf_mmd2(x_flat, x_hat_flat))
@@ -745,7 +746,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         x_data, y_labels = self.dataset.images[perm[:10000]], np.argmax(self.dataset.attrs[perm[:10000]], axis=1)
         np.random.seed()
         x_feats = self.encoder.predict(x_data, batch_size=2000)
-        self.save_precalculated_features('embedding{}'.format(n), x_feats, Y=y_labels)
+        self.save_precalculated_features('embedding', x_feats, Y=y_labels)
         return x_feats, y_labels
 
     def save_generated_images(self, n=10000):
@@ -754,16 +755,16 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         np.random.seed()
 
         generated_images = self.inception_eval_Gx.predict(samples, batch_size=2000)
-        generated_images = (generated_images*255)
+        generated_images = (generated_images*255.)
 
-        self.save_precalculated_features('samples{}'.format(n), generated_images)
+        self.save_precalculated_features('samples'.format(n), generated_images)
         return generated_images
 
     def calculate_svm_eval(self, finished_cgraph_use_event):
 
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
         if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.save_embedding_features(n=10000)
+            x_feats, y_labels = self.save_embedding_features()
         finished_cgraph_use_event.set()
 
         return svm_eval(x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000])
@@ -771,9 +772,9 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
     def calculate_svm_rbf_eval(self, finished_cgraph_use_event):
 
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
         if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.save_embedding_features(n=10000)
+            x_feats, y_labels = self.save_embedding_features()
         finished_cgraph_use_event.set()
 
         return svm_rbf_eval(x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000])
@@ -781,9 +782,9 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
     def calculate_tsne(self, finished_cgraph_use_event):
 
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
         if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.save_embedding_features(n=10000)
+            x_feats, y_labels = self.save_embedding_features()
         finished_cgraph_use_event.set()
 
         return tsne(x_feats[:1000], y_labels[:1000])
@@ -791,9 +792,9 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
     def calculate_lda(self, finished_cgraph_use_event):
 
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
         if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.save_embedding_features(n=10000)
+            x_feats, y_labels = self.save_embedding_features()
         finished_cgraph_use_event.set()
 
         return lda(x_feats[:1000], y_labels[:1000])
@@ -801,9 +802,9 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
     def calculate_pca(self, finished_cgraph_use_event):
 
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding10000')
+        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
         if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.save_embedding_features(n=10000)
+            x_feats, y_labels = self.save_embedding_features()
         finished_cgraph_use_event.set()
 
         return pca(x_feats[:1000], y_labels[:1000])
@@ -843,7 +844,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
     def calculate_mmd(self, finished_cgraph_use_event):
         x_hat = self.load_precalculated_features_if_they_exist('samples10000', has_labels=False)
         if not isinstance(x_hat, np.ndarray):
-            x_hat = self.save_generated_images(n=10000)
+            x_hat = self.save_generated_images()
         finished_cgraph_use_event.set()
 
         np.random.seed(14)
@@ -859,7 +860,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
     def calculate_inception_score(self, finished_cgraph_use_event):
         x_hat = self.load_precalculated_features_if_they_exist('samples10000', has_labels=False)
         if not isinstance(x_hat, np.ndarray):
-            x_hat = self.save_generated_images(n=10000)
+            x_hat = self.save_generated_images()
         finished_cgraph_use_event.set()
 
         mean, std = inception_score.get_inception_score(x_hat)
@@ -869,9 +870,9 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
     def calculate_s_inception_score(self, finished_cgraph_use_event):
         filename = os.path.join(
             self.tmp_out_dir,
-            "precalculated_features_{}_e{}.h5".format('samples10000', self.current_epoch))
+            "precalculated_features_{}_e{}.h5".format('samples', self.current_epoch))
         if not os.path.exists(filename):
-            _ = self.save_generated_images(n=10000)
+            _ = self.save_generated_images()
         finished_cgraph_use_event.set()
 
         mean, std = server.ask_server_for_inception_score(filename)
