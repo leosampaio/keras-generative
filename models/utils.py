@@ -315,37 +315,3 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
 
     plt.savefig(outfile, dpi=150, bbox_inches='tight')
     plt.close(fig)
-
-
-def change_losses_weight_over_time(current_epoch, max_epoch, type, scalar_loss):
-    weighting_factor = np.min((1, (current_epoch) / max_epoch))
-    if type == 'inc':
-        return scalar_loss * weighting_factor
-    elif type == 'dec':
-        return scalar_loss * (1 - weighting_factor)
-    elif type == 'hold':
-        if current_epoch >= max_epoch:
-            return scalar_loss
-        else:
-            return 0.0
-    elif type == 'hold-inc':
-        if current_epoch >= max_epoch:
-            weighting_factor = np.min((1, (current_epoch - max_epoch) / max_epoch))
-            return scalar_loss * weighting_factor
-        else:
-            return 0.0
-    elif type == 'hold-dec':
-        if current_epoch >= max_epoch:
-            weighting_factor = np.min((1, (current_epoch - max_epoch) / max_epoch))
-            return scalar_loss * (1 - weighting_factor)
-        else:
-            return 0.0
-    elif type == 'halt':
-        if current_epoch >= max_epoch:
-            return 0.0
-        else:
-            return scalar_loss
-    elif type == 'none':
-        return scalar_loss
-    else:
-        raise ValueError("type must be 'inc', 'dec', 'hold', 'halt' or 'none'")

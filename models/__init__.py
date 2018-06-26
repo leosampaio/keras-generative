@@ -17,7 +17,7 @@ from .alice_shareable import ShareableExplicitALICEforSharedExp
 from .svmgan import SupportVectorGAN
 from .svmgan_variations import SupportVectorWGAN, SupportVectorWGANwithMSE
 from .temporalcyclegan import TemporalCycleGAN
-from .topgan import TOPGAN, TOPGANbasedonInfoGAN, TOPGANwithAEfromEBGAN, TOPGANwithAEforMNIST
+from .topgan import TOPGANwithAEfromEBGAN, TOPGANwithAEforMNIST
 
 # Conditional generative models
 from .cvae import CVAE
@@ -78,9 +78,7 @@ models = {
     'svgan': SupportVectorGAN,
     'svwgan': SupportVectorWGAN,
     'svwgan_mse': SupportVectorWGANwithMSE,
-    'topgan': TOPGAN,
     'topgan_ae_mnist': TOPGANwithAEforMNIST,
-    'topgan_binfogan': TOPGANbasedonInfoGAN,
     'topgan_ae_ebgan': TOPGANwithAEfromEBGAN,
     'temporalcyclegan': TemporalCycleGAN,
     'triplet_alice': TripletALICE,

@@ -89,309 +89,21 @@ def generator_lossfun(y_true, y_pred):
     return q_error + p_error
 
 
-def mmd_lossfun(y_true, y_pred):
-    x = K.batch_flatten(y_true)
-    x_hat = K.batch_flatten(y_pred)
-    return tf.log(mmd.rbf_mmd2(x, x_hat))
-
-
-class TOPGAN(BaseModel, metaclass=ABCMeta):
-
-    def __init__(self,
-                 input_shape=(64, 64, 3),
-                 z_dims=128,
-                 name='topgan',
-                 **kwargs):
-        super().__init__(input_shape=input_shape, name=name, **kwargs)
-
-        self.z_dims = z_dims
-
-        self.f_Gx = None
-        self.f_D = None
-
-        self.gen_trainer = None
-        self.dis_trainer = None
-
-        self.is_conditional = kwargs.get('is_conditional', False)
-        self.auxiliary_classifier = kwargs.get('auxiliary_classifier', False)
-        self.conditional_dims = kwargs.get('conditional_dims', 0)
-        self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
-
-        self.triplet_margin = kwargs.get('triplet_margin', 1.0)
-        self.triplet_weight = kwargs.get('triplet_weight', 1.0)
-
-        self.last_losses = {
-            'g_loss': 10.,
-            'd_loss': 10.
-        }
-
-        self.svm = LinearSVC()
-        self.topgan_type = 'epoch_svm'  # or 'batch_svm'
-        self.did_train_svm_for_the_first_time = False
-
-        self.embedding_size = 1024
-
-        self.build_model()
-
-    def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
-
-        batchsize = len(x_data)
-
-        # perform label smoothing if applicable
-        y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=False)
-        y = np.stack((y_neg, y_pos), axis=1)
-
-        # get real latent variables distribution
-        z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
-
-        x_permutation = np.array(np.random.permutation(batchsize), dtype='int64')
-        input_data = [x_data, x_permutation, z_latent_dis]
-        label_data = [y, y]
-
-        # train both networks
-        _, d_loss, d_triplet = self.dis_trainer.train_on_batch(input_data, label_data)
-        _, g_loss, g_triplet = self.gen_trainer.train_on_batch(input_data, label_data)
-        if self.last_losses['d_loss'] < self.dis_loss_control:
-            _, g_loss, g_triplet = self.gen_trainer.train_on_batch(input_data, label_data)
-        if self.last_losses['d_loss'] < self.dis_loss_control * 1e-5:
-            for i in range(0, 5):
-                _, g_loss, g_triplet = self.gen_trainer.train_on_batch(input_data, label_data)
-
-        losses = {
-            'g_loss': g_loss,
-            'd_loss': d_loss,
-            'd_triplet': d_triplet,
-            'g_triplet': g_triplet
-        }
-
-        self.last_losses = losses
-        return losses
-
-    def predict(self, z_samples):
-        return self.f_Gx.predict(z_samples)
-
-    def build_trainer(self):
-        input_x = Input(shape=self.input_shape)
-        input_x_perm = Input(shape=(1,), dtype='int64')
-        input_z = Input(shape=(self.z_dims,))
-
-        assert self.f_D is not None
-
-        x_hat = self.f_Gx(input_z)
-        negative_embedding, p = self.f_D(x_hat)
-        anchor_embedding, q = self.f_D(input_x)
-        positive_embedding = Lambda(lambda x: K.squeeze(K.gather(anchor_embedding, input_x_perm), 1))(anchor_embedding)
-
-        input = [input_x, input_x_perm, input_z]
-
-        concatenated_dis = Concatenate(axis=-1, name="dis_classification")([p, q])
-        concatenated_triplet = Concatenate(axis=-1, name="triplet")([anchor_embedding, positive_embedding, negative_embedding])
-        output = [concatenated_dis, concatenated_triplet]
-        return Model(input, output, name='topgan')
-
-    def build_model(self):
-
-        self.f_Gx = self.build_Gx()  # Moriarty, the encoder
-        self.f_D = self.build_D()   # Sherlock, the detective
-        self.f_Gx.summary()
-        self.f_D.summary()
-
-        opt_d, opt_g = self.build_optmizers()
-        loss_d, loss_g, triplet_d_loss, triplet_g_loss = self.define_loss_functions()
-
-        # build discriminator
-        self.dis_trainer = self.build_trainer()
-        set_trainable(self.f_Gx, False)
-        set_trainable(self.f_D, True)
-        self.dis_trainer.compile(optimizer=opt_d,
-                                 loss=[loss_d, triplet_d_loss],
-                                 loss_weights=[1., 1.])
-
-        # build generators
-        self.gen_trainer = self.build_trainer()
-        set_trainable(self.f_Gx, True)
-        set_trainable(self.f_D, False)
-        self.gen_trainer.compile(optimizer=opt_g,
-                                 loss=[loss_g, triplet_g_loss],
-                                 loss_weights=[1., self.triplet_weight])
-
-        self.gen_trainer.summary()
-
-        # Store trainers
-        self.store_to_save('gen_trainer')
-
-    def save_model(self, out_dir, epoch):
-        self.trainers['f_Gx'] = self.f_Gx
-        self.trainers['f_D'] = self.f_D
-        super().save_model(out_dir, epoch)
-
-    def define_loss_functions(self):
-        return (discriminator_lossfun, generator_lossfun,
-                triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size),
-                triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, inverted=True))
-
-    def save_images(self, samples, filename, conditionals_for_samples=None):
-        '''
-        Save images generated from random sample numbers
-        '''
-        imgs = self.predict(samples)
-        if imgs.shape[3] == 1:
-            imgs = np.squeeze(imgs, axis=(3,))
-        self.save_image_as_plot(imgs, filename)
-
-    def did_collapse(self, losses):
-        return False
-
-    def build_Gx(self):
-        z_input = Input(shape=(self.z_dims,))
-
-        x = Dense(256, input_dim=self.z_dims, kernel_initializer=initializers.RandomNormal(stddev=0.02))(z_input)
-        x = LeakyReLU(0.2)(x)
-        x = Dense(512)(x)
-        x = LeakyReLU(0.2)(x)
-        x = Dense(1024)(x)
-        x = LeakyReLU(0.2)(x)
-        x = Dense(self.input_shape[0] * self.input_shape[1] * self.input_shape[2], activation='sigmoid')(x)
-        x = Reshape((self.input_shape[0], self.input_shape[1], self.input_shape[2]))(x)
-
-        return Model(z_input, x)
-
-    def build_D(self):
-        x_input = Input(shape=self.input_shape)
-
-        x = BasicConvLayer(32, (5, 5), strides=(1, 1), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.01)(x_input)
-        x = BasicConvLayer(64, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
-        # x = ResLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
-        # x = ResLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
-        # x = ResLayer(128, (3, 3), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
-        x = BasicConvLayer(256, (3, 3), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.01)(x)
-        x_embedding = Flatten()(x)
-
-        x_embedding = Dense(self.embedding_size)(x_embedding)
-        x_embedding = LeakyReLU(0.01)(x_embedding)
-        x_embedding = Dropout(0.2)(x_embedding)
-
-        fc_x = Dense(1024)(x_embedding)
-        fc_x = LeakyReLU(0.01)(fc_x)
-        fc_x = Dropout(0.2)(fc_x)
-
-        fc_x = Dense(1)(fc_x)
-        fc_x = Activation('sigmoid')(fc_x)
-
-        return Model(x_input, [x_embedding, fc_x])
-
-    def build_optmizers(self):
-        opt_d = Adam(lr=self.lr)
-        opt_g = Adam(lr=self.lr)
-        return opt_d, opt_g
-
-
-class TOPGANbasedonInfoGAN(BaseModel, metaclass=ABCMeta):
-
-    def __init__(self,
-                 input_shape=(64, 64, 3),
-                 z_dims=128,
-                 name='topgan_binfogan',
-                 **kwargs):
-        super().__init__(input_shape=input_shape, name=name, **kwargs)
-
-        self.z_dims = z_dims
-
-        self.f_Gx = None
-        self.f_D = None
-
-        self.gen_trainer = None
-        self.dis_trainer = None
-
-        self.is_conditional = kwargs.get('is_conditional', False)
-        self.auxiliary_classifier = kwargs.get('auxiliary_classifier', False)
-        self.conditional_dims = kwargs.get('conditional_dims', 0)
-        self.conditionals_for_samples = kwargs.get('conditionals_for_samples', False)
-
-        self.triplet_margin = kwargs.get('triplet_margin', 1.0)
-        self.triplet_weight = kwargs.get('triplet_weight', 1.0)
-
-        self.last_losses = {
-            'g_loss': 10.,
-            'd_loss': 10.
-        }
-
-        self.svm = LinearSVC()
-        self.topgan_type = 'epoch_svm'  # or 'batch_svm'
-        self.did_train_svm_for_the_first_time = False
-
-        self.embedding_size = 1024
-
-        self.build_model()
-
-    train_on_batch = TOPGAN.__dict__['train_on_batch']
-    predict = TOPGAN.__dict__['predict']
-    build_trainer = TOPGAN.__dict__['build_trainer']
-    build_model = TOPGAN.__dict__['build_model']
-    define_loss_functions = TOPGAN.__dict__['define_loss_functions']
-    save_images = TOPGAN.__dict__['save_images']
-    did_collapse = TOPGAN.__dict__['did_collapse']
-    build_optmizers = TOPGAN.__dict__['build_optmizers']
-
-    def save_model(self, out_dir, epoch):
-        self.trainers['f_Gx'] = self.f_Gx
-        self.trainers['f_D'] = self.f_D
-        super().save_model(out_dir, epoch)
-
-    def build_Gx(self):
-        """
-        Network Architecture based on the one presented in infoGAN
-        """
-        z_input = Input(shape=(self.z_dims,))
-
-        x = Dense(1024, input_dim=self.z_dims)(z_input)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
-
-        x = Dense(128 * (self.input_shape[0] // 4) * (self.input_shape[1] // 4))(x)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
-
-        x = Reshape((self.input_shape[0] // 4, self.input_shape[1] // 4, 128))(x)
-
-        x = BasicDeconvLayer(64, (4, 4), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-        x = BasicDeconvLayer(self.input_shape[2], (4, 4), strides=(2, 2), bnorm=False, padding='same', activation='sigmoid')(x)
-
-        return Model(z_input, x)
-
-    def build_D(self):
-        """
-        Network Architecture based on the one presented in infoGAN
-        """
-        x_input = Input(shape=self.input_shape)
-
-        x = BasicConvLayer(64, (4, 4), strides=(2, 2), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.2)(x_input)
-        x = BasicConvLayer(128, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2)(x)
-        x_embedding = Flatten()(x)
-
-        x_embedding = Dense(self.embedding_size)(x_embedding)
-        x_embedding = BatchNormalization()(x_embedding)
-        x_embedding = LeakyReLU(0.2)(x_embedding)
-
-        fc_x = Dense(1)(x_embedding)
-        fc_x = Activation('sigmoid')(fc_x)
-
-        return Model(x_input, [x_embedding, fc_x])
-
-
 class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
+    name = 'topgan_ae_ebgan'
+    loss_names = ['g_loss', 'd_loss', 'd_triplet',
+                  'g_triplet', 'ae_loss']
+    loss_plot_organization = [('g_loss', 'd_loss'), 'd_triplet',
+                  'g_triplet', 'ae_loss']
 
     def __init__(self,
                  input_shape=(64, 64, 3),
                  z_dims=128,
-                 name='topgan_ae_ebgan',
                  embedding_dim=256,
                  isolate_d_classifier=False,
-                 loss_weights=[1., 1., 1., 1.],
-                 loss_control=None,
-                 loss_control_epoch=None,
+                 triplet_margin=1.,
                  **kwargs):
-        super().__init__(input_shape=input_shape, name=name, **kwargs)
+        super().__init__(input_shape=input_shape, **kwargs)
 
         self.z_dims = z_dims
 
@@ -400,54 +112,14 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         self.gen_trainer = None
         self.dis_trainer = None
-
-        self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
-                           'g_triplet', 'ae_loss']
-        self.n_losses = len(self.loss_names)
-
-        self.last_losses = dict(list(zip(self.loss_names, [100.] * self.n_losses)))
-        self.all_losses = dict(list(zip(self.loss_names, [[] for i in range(self.n_losses)])))
-        self.loss_weights = dict(list(zip(self.loss_names, loss_weights)))
-
-        self.triplet_margin = kwargs.get('triplet_margin', 1.0)
 
         self.embedding_size = embedding_dim
         self.isolate_d_classifier = isolate_d_classifier
-
-        if loss_control:
-            if loss_control_epoch is None:
-                raise ValueError("You need to specify the epoches to "
-                                 "implement with loss control")
-            self.loss_control = dict(list(zip(self.loss_names, loss_control)))
-            self.loss_control_epoch = dict(list(zip(self.loss_names, loss_control_epoch)))
-        else:
-            self.loss_control = dict(list(zip(self.loss_names, ['none'] * self.n_losses)))
-            self.loss_control_epoch = dict(list(zip(self.loss_names, [1] * self.n_losses)))
-
-        self.last_loss_weights = {l: 0. for l in self.loss_names}
-        self.loss_weights_across_time = {l: [] for l in self.loss_names}
-        self.backend_losses = {l: K.variable(0) for l in self.loss_names}
-        self.opt_states = None
-        self.optimizers = None
-        self.update_loss_weights()
+        self.triplet_margin = triplet_margin
 
         pprint(vars(self))
 
         self.build_model()
-
-    def get_experiment_id(self):
-        id = "{}_zdim{}_edim{}".format(self.name, self.z_dims, self.embedding_size)
-        for l, k_loss in self.backend_losses.items():
-            id = "{}_L{}{}{}{}".format(id, l.replace('_', ''), self.loss_weights[l],
-                                       self.loss_control[l].replace('-', ''), self.loss_control_epoch[l])
-        return id.replace('.', '')
-
-    train_on_batch = TOPGAN.__dict__['train_on_batch']
-    predict = TOPGAN.__dict__['predict']
-    build_trainer = TOPGAN.__dict__['build_trainer']
-    define_loss_functions = TOPGAN.__dict__['define_loss_functions']
-    did_collapse = TOPGAN.__dict__['did_collapse']
-    build_optmizers = TOPGAN.__dict__['build_optmizers']
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
 
@@ -470,42 +142,17 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         label_data = [y, y, x_data]
 
         # train both networks
+        ld = {}  # loss dictionary
         # _, _, d_triplet, ae_loss = self.ae_triplet_trainer.train_on_batch(input_data, label_data)
-        _, d_loss, d_triplet, ae_loss = self.dis_trainer.train_on_batch(input_data, label_data)
-        _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
-        if self.last_losses['d_loss'] < self.dis_loss_control:
-            _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
-        if self.last_losses['d_loss'] < self.dis_loss_control * 1e-2:
+        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'] = self.dis_trainer.train_on_batch(input_data, label_data)
+        _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
+        if self.losses['d_loss'].last_value < 0.1:
+            _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
+        if self.losses['d_loss'].last_value < 0.001:
             for i in range(0, 5):
-                _, g_loss, g_triplet, _ = self.gen_trainer.train_on_batch(input_data, label_data)
+                _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
 
-        losses = dict(zip(self.loss_names, [g_loss, d_loss, d_triplet, g_triplet, ae_loss]))
-        self.last_losses = losses
-        for k, v in losses.items():
-            self.all_losses[k].append(v)
-            self.loss_weights_across_time[k].append(self.last_loss_weights[k])
-        return losses
-
-    def did_train_over_an_epoch(self):
-        self.update_loss_weights()
-
-    def update_loss_weights(self):
-        log_message = "New loss weights: "
-        weight_delta = 0.
-        for l, k_loss in self.backend_losses.items():
-            new_loss = change_losses_weight_over_time(self.current_epoch,
-                                                      self.loss_control_epoch[l],
-                                                      self.loss_control[l],
-                                                      self.loss_weights[l])
-            K.set_value(k_loss, new_loss)
-            log_message = "{}{}:{}, ".format(log_message, l, K.get_value(k_loss))
-            weight_delta = np.max((weight_delta, np.abs(new_loss - self.last_loss_weights[l])))
-
-        if weight_delta > 0.1:
-            self.last_loss_weights = {l: K.get_value(k_loss) for l, k_loss in self.backend_losses.items()}
-            self.reset_optimizers()
-            log_message = "{}. Did reset optmizers".format(log_message)
-        print(log_message)
+        return ld
 
     def build_trainer(self):
         input_x = Input(shape=self.input_shape)
@@ -516,7 +163,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         assert self.f_D is not None
 
         clipping_layer = Lambda(lambda x: K.clip(x, 0., 1.))
-        
+
         x_noisy = clipping_layer(Add()([input_x, input_noise]))
         x_hat = self.f_Gx(input_z)
 
@@ -531,7 +178,6 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         concatenated_triplet = Concatenate(axis=-1, name="triplet")([anchor_embedding, positive_embedding, negative_embedding])
         output = [concatenated_dis, concatenated_triplet, x_reconstructed]
         return Model(input, output, name='topgan')
-
 
     def build_model(self):
 
@@ -553,7 +199,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.aux_classifier, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
                                  loss=[loss_d, triplet_d_loss, 'mse'],
-                                 loss_weights=[self.backend_losses['d_loss'], self.backend_losses['d_triplet'], self.backend_losses['ae_loss']])
+                                 loss_weights=[self.losses['d_loss'].backend, self.losses['d_triplet'].backend, self.losses['ae_loss'].backend])
 
         # build autoencoder+triplet
         # self.ae_triplet_trainer = self.build_trainer()
@@ -562,7 +208,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         # set_trainable(self.aux_classifier, not self.isolate_d_classifier)
         # self.ae_triplet_trainer.compile(optimizer=self.optimizers["opt_ae"],
         #                                 loss=[loss_d, triplet_d_loss, 'mse'],
-        #                                 loss_weights=[0., self.backend_losses['d_triplet'], self.backend_losses['ae_loss']])
+        #                                 loss_weights=[0., self.losses['d_triplet'].backend, self.losses['ae_loss'].backend])
 
         # build generators
         self.gen_trainer = self.build_trainer()
@@ -570,7 +216,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
                                  loss=[loss_g, triplet_g_loss, 'mse'],
-                                 loss_weights=[self.backend_losses['g_loss'], self.backend_losses['g_triplet'], 0.])
+                                 loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, 0.])
 
         self.gen_trainer.summary()
 
@@ -590,31 +236,15 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
                 "opt_g": opt_g,
                 "opt_ae": opt_ae}
 
-    def reset_optimizers(self):
-        if self.opt_states is None:  # never did that, initialize
-            if self.optimizers is not None:
-                self.opt_states = {k: opt.get_weights() for k, opt in self.optimizers.items()}
-            return
-        for k, opt in self.optimizers.items():
-            opt.set_weights(self.opt_states[k])
-
     def save_model(self, out_dir, epoch):
         self.trainers['f_Gx'] = self.f_Gx
         self.trainers['f_D'] = self.f_D
         super().save_model(out_dir, epoch)
 
-    def plot_losses_hist(self, outfile):
-        pass
-
-    def get_extra_metrics_for_plot(self):
-        metrics = [(self.all_losses['g_loss'], self.all_losses['d_loss']),
-                   self.all_losses['g_triplet'],
-                   self.all_losses['d_triplet'],
-                   self.all_losses['ae_loss'], tuple(self.loss_weights_across_time.values())]
-        iters = [list(range(len(self.all_losses['ae_loss'])))] * len(metrics)
-        m_names = [('g_loss', 'd_loss'), 'g_triplet', 'd_triplet', 'ae_loss', tuple(self.loss_weights_across_time.keys())]
-        types = ['lines'] * len(metrics)
-        return metrics, iters, m_names, types
+    def define_loss_functions(self):
+        return (discriminator_lossfun, generator_lossfun,
+                triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size),
+                triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, inverted=True))
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -755,7 +385,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         np.random.seed()
 
         generated_images = self.inception_eval_Gx.predict(samples, batch_size=2000)
-        generated_images = (generated_images*255.)
+        generated_images = (generated_images * 255.)
 
         self.save_precalculated_features('samples'.format(n), generated_images)
         return generated_images
@@ -851,9 +481,9 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         perm = np.random.permutation(len(self.dataset))
         np.random.seed()
 
-        imgs_from_dataset = self.dataset.images[perm[:10000]]*255.
+        imgs_from_dataset = self.dataset.images[perm[:10000]] * 255.
         mmd = K.get_session().run(self.mmd_computer, feed_dict={'mmd_x:0': imgs_from_dataset, 'mmd_x_hat:0': x_hat})
-        
+
         return mmd
     mmd_metric_type = 'lines'
 

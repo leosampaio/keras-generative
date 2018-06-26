@@ -40,18 +40,10 @@ def main():
     parser.add_argument('--triplet-weight', default=1., type=float)
     parser.add_argument('--embedding-dim', default=256, type=int)
     parser.add_argument('--isolate-d-classifier', action='store_true')
-    parser.add_argument('--loss-weights', type=float, nargs='+',
-                        help="weights for each loss function")
-    parser.add_argument('--loss-control', type=str, nargs='+',
-                        help="one of 'inc', 'dec', 'hold', 'halt' or "
-                        "'none' for each loss function")
-    parser.add_argument('--loss-control-epoch', type=int, nargs='+',
-                        help="epoch selected to work with loss-control method, "
-                        "one for each loss function")
+    parser.add_argument('--controlled-losses', type=str, nargs='+',
+                        help="strings in format loss_name:weight:control_type:pivot_epoch")
     parser.add_argument('--metrics', type=str, nargs='+',
                         help="selection of metrics you want to calculate")
-    parser.add_argument('--metrics-every', type=int,
-                        help="metrics frequency (by epoch)")
 
     args = parser.parse_args()
 

@@ -16,6 +16,7 @@ from keras.models import load_model
 from abc import ABCMeta, abstractmethod
 
 from .utils import *
+from core.losses import Loss
 
 try:
     from .notifyier import *
@@ -30,47 +31,53 @@ class BaseModel(metaclass=ABCMeta):
     '''
 
     def __init__(self, **kwargs):
-        '''
-        Initialization
-        '''
-        if 'name' not in kwargs:
-            raise Exception('Please specify model name!')
+
+        if not hasattr(self, 'name'):
+            raise Exception('You must give your model a reference name')
+
+        if not hasattr(self, 'loss_names'):
+            raise Exception("You must define your model's expected losses in a loss_names attribute")
+        self.n_losses = len(self.loss_names)
+
         self.current_epoch = 0
-
         self.run_id = kwargs.get('run_id', 0)
-
-        self.name = "{}_r{}".format(kwargs['name'], self.run_id)
+        self.name = "{}_r{}".format(self.name, self.run_id)
 
         if 'input_shape' not in kwargs:
             raise Exception('Please specify input shape!')
-
         self.input_shape = kwargs['input_shape']
 
-        if 'output' not in kwargs:
-            self.output = 'output'
-        else:
-            self.output = kwargs['output']
-
+        self.output = kwargs.get('output', 'output')
         self.test_mode = kwargs.get('test_mode', False)
+
         self.trainers = {}
-        self.last_epoch = 0
-        self.dataset = None
-        self.g_losses, self.d_losses, self.losses_ratio = [], [], []
+        self.last_epoch = 0  # recalculated from weights filename if it is loaded later
         self.label_smoothing = kwargs.get('label_smoothing', 0.0)
         self.input_noise = kwargs.get('input_noise', 0.0)
 
         self.checkpoint_every = kwargs.get('checkpoint_every', 1)
         self.notify_every = kwargs.get('notify_every', self.checkpoint_every)
         self.lr = kwargs.get('lr', 1e-4)
-        self.dis_loss_control = kwargs.get('dis_loss_control', 1.0)
 
+        # generic loss setup - start
+        controlled_losses = kwargs.get('controlled_losses', [])
+        self.losses = {}
+        for loss_name in self.loss_names:
+
+            # get correct string if it exists
+            control_string = next((l for l in controlled_losses if l.startswith(loss_name)), False)
+            if control_string:
+                self.losses[loss_name] = Loss.from_control_string(control_string)
+            else:
+                self.losses[loss_name] = Loss()
+        self.opt_states = None
+        self.optimizers = None
+        self.update_loss_weights()
+        # generic loss setup - end
+
+        # generic metric setup - start
         if kwargs.get('metrics') is not None:
             metrics = kwargs.get('metrics')
-            if kwargs.get('metrics_every') is None:
-                raise ValueError("Missing 'metrics-every' argument. "
-                                 "If you specify metrics you should "
-                                 "also specify when they should be sent")
-            self.metrics_every = kwargs.get('metrics_every')
             try:
                 self.metric_calculators = {m: getattr(self, "calculate_{}".format(m)) for m in metrics}
                 self.metrics = {m: [] for m in metrics}
@@ -81,12 +88,17 @@ class BaseModel(metaclass=ABCMeta):
             except AttributeError:
                 raise AttributeError("You must define calculate_ methods for "
                                      "all your metrics")
-
         else:
             self.metrics = None
+        # generic metric setup - end
 
     def get_experiment_id(self):
-        return self.name
+        id = "{}_zdim{}_edim{}".format(self.name, self.z_dims, self.embedding_size)
+        for l, loss in self.losses.items():
+            id = "{}_L{}{}{}{}".format(id, l.replace('_', ''), loss.weight,
+                                       loss.weight_control_type.replace('-', ''),
+                                       loss.pivot_control_epoch)
+        return id.replace('.', '')
 
     def _get_experiment_id(self):
         return self.get_experiment_id()
@@ -119,7 +131,6 @@ class BaseModel(metaclass=ABCMeta):
         print('\n\n--- START TRAINING ---\n')
         num_data = len(dataset)
         self.batchsize = batchsize
-        self.g_losses, self.d_losses, self.losses_ratio = [], [], []
         self.make_predict_functions()
         for e in range(self.last_epoch, epochs):
             perm = np.random.permutation(num_data)
@@ -141,6 +152,8 @@ class BaseModel(metaclass=ABCMeta):
 
                 # finally, train and report status
                 losses = self.train_on_batch(x_batch, y_batch=y_batch)
+                self.update_loss_history(losses)
+
                 print_current_progress(e, b, bsize, len(dataset), losses, elapsed_time=time.time() - start_time)
 
                 # check for collapse scenario where G and D losses are equal
@@ -162,25 +175,39 @@ class BaseModel(metaclass=ABCMeta):
             if ((self.current_epoch) % self.checkpoint_every) == 0:
                 self.save_model(self.wgt_out_dir, self.current_epoch)
             if ((self.current_epoch) % self.notify_every) == 0:
-                self.send_checkpoint_notification()
-            if ((self.current_epoch) % self.metrics_every) == 0:
                 self.send_metrics_notification()
 
             elapsed_time = time.time() - start_time
             print('Took: {}s\n'.format(elapsed_time))
             self.did_train_over_an_epoch()
+            self.update_loss_weights()
 
-    def plot_losses_hist(self, outfile):
-        plt.plot(self.g_losses, label='Gen')
-        plt.plot(self.d_losses, label='Dis')
-        plt.legend()
-        plt.savefig(outfile)
-        plt.close()
+    def update_loss_weights(self):
+        log_message = "New loss weights: "
+        weight_delta = 0.
+        for l, loss in self.losses.items():
+            new_loss, delta = loss.update_weight_based_on_time(self.current_epoch)
+            log_message = "{}{}:{}, ".format(log_message, l, new_loss)
+            weight_delta = np.max((weight_delta, delta))
 
-    def save_losses_history(self, losses):
-        self.g_losses.append(losses['g_loss'])
-        self.d_losses.append(losses['d_loss'])
-        self.losses_ratio.append(losses['g_loss'] / losses['d_loss'])
+        if weight_delta > 0.1:
+            for l in self.losses.values():
+                l.reset_weight_from_last_significant_change()
+            self.reset_optimizers()
+            log_message = "{}. Did reset optmizers".format(log_message)
+        print(log_message)
+
+    def reset_optimizers(self):
+        if self.opt_states is None:
+            if self.optimizers is not None:
+                self.opt_states = {k: opt.get_weights() for k, opt in self.optimizers.items()}
+            return
+        for k, opt in self.optimizers.items():
+            opt.set_weights(self.opt_states[k])
+
+    def update_loss_history(self, new_losses):
+        for l, loss in self.losses.items():
+            loss.update_history(new_losses[l])
 
     def make_predict_functions(self):
         """
@@ -232,13 +259,6 @@ class BaseModel(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def predict(self, z_sample):
-        '''
-        Plase override "predict" method in the derived model!
-        '''
-        pass
-
-    @abstractmethod
     def train_on_batch(self, x_batch, y_batch=None, compute_grad_norms=False):
         '''
         Plase override "train_on_batch" method in the derived model!
@@ -267,7 +287,7 @@ class BaseModel(metaclass=ABCMeta):
         return y_pos, y_neg
 
     def calculate_all_metrics(self):
-        log_message = "Metrics for Epoch #{}: ".format(np.max((self.current_epoch - self.metrics_every, 1)))
+        log_message = "Metrics for Epoch #{}: ".format(np.max((self.current_epoch - self.notify_every, 1)))
         self.did_go_through_all_metrics = threading.Event()
         for m, calculation_fun in self.metric_calculators.items():
             self.metrics_calc_threads[m].join()
@@ -320,15 +340,17 @@ class BaseModel(metaclass=ABCMeta):
 
     def plot_all_metrics(self, outfile):
         if all(d for d in self.metrics.values()):
+            l_metrics, l_iters, l_names, l_types = self.get_loss_metrics_for_plot(self.loss_plot_organization)
+            lw_metrics, lw_iters, lw_names, lw_types = self.get_loss_weight_metrics_for_plot()
             e_metrics, e_iters, e_names, e_types = self.get_extra_metrics_for_plot()
             metrics, names = list(self.metrics.values()), list(self.metrics.keys())
-            iters = [list(range(self.metrics_every, self.current_epoch, self.metrics_every))] * len(self.metrics)
+            iters = [list(range(self.notify_every, self.current_epoch, self.notify_every))] * len(self.metrics)
             types = list(self.metric_types[k] for k in self.metrics.keys())
             plot_metrics(outfile,
-                         metrics_list=metrics + e_metrics,
-                         iterations_list=iters + e_iters,
-                         metric_names=names + e_names,
-                         types=types + e_types,
+                         metrics_list=metrics + e_metrics + l_metrics + lw_metrics,
+                         iterations_list=iters + e_iters + l_iters + lw_iters,
+                         metric_names=names + e_names + l_names + lw_names,
+                         types=types + e_types + l_types + lw_types,
                          legend=True,
                          figsize=8,
                          wspace=0.15)
@@ -338,6 +360,33 @@ class BaseModel(metaclass=ABCMeta):
             self.did_go_through_all_metrics.set()
             return False
 
+    def get_loss_metrics_for_plot(self, plot_organization):
+        metrics = []
+        iters = []
+        names = []
+        for l in plot_organization:
+            if isinstance(l, (tuple, list)):
+                submetrics, subiters, subnames, _ = self.get_loss_metrics_for_plot(l)
+                metrics.append(submetrics)
+                iters.append(subiters[0])
+                names.append(subnames)
+            else:
+                metrics.append(self.losses[l].history)
+                iters.append(list(range(len(self.losses[l].history))))
+                names.append(l)
+        return metrics, iters, names, ['lines'] * len(metrics)
+
+    def get_loss_weight_metrics_for_plot(self):
+        metrics = []
+        names = []
+        contrast_increment = 0  # increment to help loss weight visualization
+        for l in self.loss_names:
+            metrics.append(np.array(self.losses[l].weight_history) + contrast_increment)
+            names.append(l)
+            contrast_increment += 0.005
+        iters = list(range(len(metrics[0])))
+        return [metrics], [iters], [names], ['lines']
+
     def get_extra_metrics_for_plot(self):
         """
         should return any metrics you want to plot together with the 
@@ -346,7 +395,7 @@ class BaseModel(metaclass=ABCMeta):
         returns 5 lists: 
             metrics_list, iterations_list, metric_names, metric_types
         """
-        return [] * 4
+        return [[]] * 4
 
     def load_precalculated_features_if_they_exist(self, feature_type, has_labels=True):
         filename = os.path.join(
@@ -376,10 +425,6 @@ class BaseModel(metaclass=ABCMeta):
             if Y is not None:
                 hf.create_dataset("labels",  data=Y)
         print("[Precalc] Saving {} took {}s".format(feature_type, time.time() - start))
-
-    def send_checkpoint_notification(self):
-        outfile_signature = os.path.join(self.res_out_dir, "epoch_{:04}".format(self.current_epoch))
-        self.plot_losses_hist("{}_losses.png".format(outfile_signature))
 
     def send_metrics_notification(self):
         outfile = os.path.join(self.res_out_dir, "epoch_{:04}_metrics.png".format(self.current_epoch))
