@@ -36,7 +36,11 @@ class BaseModel(metaclass=ABCMeta):
             raise Exception('You must give your model a reference name')
 
         if not hasattr(self, 'loss_names'):
-            raise Exception("You must define your model's expected losses in a loss_names attribute")
+            raise Exception("You must define your model's expected losses "
+                            "in a loss_names attribute")
+        if not hasattr(self, 'loss_names'):
+            raise Exception("You must define your model's loss plot"
+                            "organization in a loss_plot_organization attribute ")
         self.n_losses = len(self.loss_names)
 
         self.current_epoch = 0
