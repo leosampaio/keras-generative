@@ -14,7 +14,7 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
 from keras.optimizers import Adam, Adadelta
 from keras import backend as K
 
-from .base import BaseModel
+from core.models import BaseModel
 
 from .utils import *
 from .layers import *

@@ -15,13 +15,14 @@ import matplotlib.gridspec as gridspec
 from keras.models import load_model
 from abc import ABCMeta, abstractmethod
 
-from .utils import *
+from models.utils import *
 from core.losses import Loss
+import metrics
 
 try:
-    from .notifyier import *
+    from core.notifyier import *
 except ImportError as e:
-    print(e)
+    print(repr(e))
     print("You did not set a notifyier. Notifications will not be sent anywhere")
 
 
@@ -62,6 +63,7 @@ class BaseModel(metaclass=ABCMeta):
         self.checkpoint_every = kwargs.get('checkpoint_every', 1)
         self.notify_every = kwargs.get('notify_every', self.checkpoint_every)
         self.lr = kwargs.get('lr', 1e-4)
+        self.z_dims = kwargs.get('z_dims', 100)
 
         # generic loss setup - start
         controlled_losses = kwargs.get('controlled_losses', [])
@@ -81,17 +83,8 @@ class BaseModel(metaclass=ABCMeta):
 
         # generic metric setup - start
         if kwargs.get('metrics') is not None:
-            metrics = kwargs.get('metrics')
-            try:
-                self.metric_calculators = {m: getattr(self, "calculate_{}".format(m)) for m in metrics}
-                self.metrics = {m: [] for m in metrics}
-                self.metrics_calc_threads = {m: threading.Thread() for m in metrics}
-                self.metric_types = {m: getattr(self, "{}_metric_type".format(m)) for m in metrics}
-                for t in self.metrics_calc_threads.values():
-                    t.start()
-            except AttributeError:
-                raise AttributeError("You must define calculate_ methods for "
-                                     "all your metrics")
+            desired_metrics = kwargs.get('metrics')
+            self.metrics = {m: metrics.build_metric_by_name(m) for m in desired_metrics}
         else:
             self.metrics = None
         # generic metric setup - end
@@ -276,80 +269,31 @@ class BaseModel(metaclass=ABCMeta):
         # images = np.clip(predictions * 0.5 + 0.5, 0.0, 1.0)
         return images
 
-    @staticmethod
-    def get_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
-        if smoothing > 0.0:
-            y_pos = 1. - np.random.random((batchsize, )) * smoothing
-            if one_sided_smoothing:
-                y_neg = np.zeros(batchsize, dtype='float32')
-            else:
-                y_neg = np.random.random((batchsize, )) * smoothing
-        else:
-            y_pos = np.ones(batchsize, dtype='float32')
-            y_neg = np.zeros(batchsize, dtype='float32')
+    def gather_data_for_metric(self, data_type):
+        data = self.load_precomputed_features_if_they_exist(data_type)
+        if not data:
+            try:
+                gather_func = getattr(self, "precompute_and_save_{}".format(data_type))
+            except AttributeError:
+                raise AttributeError("One of your metrics requires a "
+                                     "precompute_and_save_{} method".format(data_type))
+            data = gather_func()
+        return data
 
-        return y_pos, y_neg
-
-    def calculate_all_metrics(self):
+    def compute_all_metrics(self):
         log_message = "Metrics for Epoch #{}: ".format(np.max((self.current_epoch - self.notify_every, 1)))
-        self.did_go_through_all_metrics = threading.Event()
-        for m, calculation_fun in self.metric_calculators.items():
-            self.metrics_calc_threads[m].join()
-            if not self.metrics[m]:
-                log_message = "{} {}: {},".format(log_message, m, "waiting")
-            elif self.metric_types[m] == 'lines':
-                log_message = "{} {}: {},".format(log_message, m, self.metrics[m][-1])
-            else:
-                log_message = "{} {}: plotted,".format(log_message, m)
-            finished_cgraph_use_event = threading.Event()
-
-            self.metrics_calc_threads[m] = threading.Thread(target=self.metrics_calculation_worker,
-                                                            args=(calculation_fun, self.metrics[m],
-                                                                  self.metric_types[m],
-                                                                  finished_cgraph_use_event,
-                                                                  self.did_go_through_all_metrics))
-            self.metrics_calc_threads[m].start()
-            finished_cgraph_use_event.wait()
+        for m, metric in self.metrics.items():
+            input_data = self.gather_data_for_metric(metric.input_type)
+            metric.compute_in_parallel(input_data)
+            log_message = "{} {}: {},".format(log_message, m, metric.last_value_repr)
         return log_message
 
-    def metrics_calculation_worker(self, calculation_fun, results, mtype,
-                                   finished_cgraph_use_event, did_go_through_all_metrics):
-        try:
-            result = calculation_fun(finished_cgraph_use_event)
-        except Exception as e:
-            print("Exception while computing metrics: {}".format(repr(e)))
-            if mtype == 'lines':
-                if not results:
-                    result = 0
-                else:
-                    result = results[-1]
-        # wait for all metrics to finish
-        # before appending the results
-        did_go_through_all_metrics.wait()
-        if mtype == 'lines':
-            results.append(result)
-        elif mtype == 'scatter' or mtype == 'image-grid':
-            if not results:
-                results.append(result)
-            else:
-                results[-1] = result
-
-    def calculate_samples(self, finished_cgraph_use_event):
-        imgs = self.predict(self.samples)
-        finished_cgraph_use_event.set()
-        if imgs.shape[3] == 1:
-            imgs = np.squeeze(imgs, axis=(3,))
-        return imgs
-    samples_metric_type = 'image-grid'
-
     def plot_all_metrics(self, outfile):
-        if all(d for d in self.metrics.values()):
+        if all(d.is_ready_for_plot() for d in self.metrics.values()):
+            metrics, iters, names, types = self.get_metrics_for_plot()
             l_metrics, l_iters, l_names, l_types = self.get_loss_metrics_for_plot(self.loss_plot_organization)
             lw_metrics, lw_iters, lw_names, lw_types = self.get_loss_weight_metrics_for_plot()
             e_metrics, e_iters, e_names, e_types = self.get_extra_metrics_for_plot()
-            metrics, names = list(self.metrics.values()), list(self.metrics.keys())
-            iters = [list(range(self.notify_every, self.current_epoch, self.notify_every))] * len(self.metrics)
-            types = list(self.metric_types[k] for k in self.metrics.keys())
             plot_metrics(outfile,
                          metrics_list=metrics + e_metrics + l_metrics + lw_metrics,
                          iterations_list=iters + e_iters + l_iters + lw_iters,
@@ -358,16 +302,12 @@ class BaseModel(metaclass=ABCMeta):
                          legend=True,
                          figsize=8,
                          wspace=0.15)
-            self.did_go_through_all_metrics.set()
             return True
         else:
-            self.did_go_through_all_metrics.set()
             return False
 
     def get_loss_metrics_for_plot(self, plot_organization):
-        metrics = []
-        iters = []
-        names = []
+        metrics, iters, names = [], [], []
         for l in plot_organization:
             if isinstance(l, (tuple, list)):
                 submetrics, subiters, subnames, _ = self.get_loss_metrics_for_plot(l)
@@ -381,30 +321,35 @@ class BaseModel(metaclass=ABCMeta):
         return metrics, iters, names, ['lines'] * len(metrics)
 
     def get_loss_weight_metrics_for_plot(self):
-        metrics = []
-        names = []
+        metrics, names = [], []
         contrast_increment = 0  # increment to help loss weight visualization
-        for l in self.loss_names:
-            metrics.append(np.array(self.losses[l].weight_history) + contrast_increment)
+        for l, loss in self.losses.items():
+            metrics.append(np.array(loss.weight_history) + contrast_increment)
             names.append(l)
             contrast_increment += 0.005
         iters = list(range(len(metrics[0])))
         return [metrics], [iters], [names], ['lines']
 
+    def get_metrics_for_plot(self):
+        metrics, iters, names, types = [], [], [], []
+        for m, metric in self.metrics.items():
+            metrics.append(metric.get_data_for_plot())
+            names.append(m)
+            iters.append(list(range(len(metric.get_data_for_plot()))))
+            types.append(metric.plot_type)
+        return metrics, iters, names, types
+
     def get_extra_metrics_for_plot(self):
         """
-        should return any metrics you want to plot together with the 
-        frequent ones
-
-        returns 5 lists: 
+        returns 4 lists: 
             metrics_list, iterations_list, metric_names, metric_types
         """
         return [[]] * 4
 
-    def load_precalculated_features_if_they_exist(self, feature_type, has_labels=True):
+    def load_precomputed_features_if_they_exist(self, feature_type, has_labels=True):
         filename = os.path.join(
             self.tmp_out_dir,
-            "precalculated_features_{}_e{}.h5".format(feature_type, self.current_epoch))
+            "precomputed_{}_e{}.h5".format(feature_type, self.current_epoch))
         if os.path.exists(filename):
             with h5py.File(filename, 'r') as hf:
                 x = hf['feats'][:]
@@ -414,16 +359,13 @@ class BaseModel(metaclass=ABCMeta):
                 else:
                     return x
         else:
-            if has_labels:
-                return False, False
-            else:
-                return False
+            return False
 
-    def save_precalculated_features(self, feature_type, X, Y=None):
+    def save_precomputed_features(self, feature_type, X, Y=None):
         start = time.time()
         filename = os.path.join(
             self.tmp_out_dir,
-            "precalculated_features_{}_e{}.h5".format(feature_type, self.current_epoch))
+            "precomputed_{}_e{}.h5".format(feature_type, self.current_epoch))
         with h5py.File(filename, 'w') as hf:
             hf.create_dataset("feats",  data=X)
             if Y is not None:
@@ -432,7 +374,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def send_metrics_notification(self):
         outfile = os.path.join(self.res_out_dir, "epoch_{:04}_metrics.png".format(self.current_epoch))
-        log_message = self.calculate_all_metrics()
+        log_message = self.compute_all_metrics()
         did_plot = self.plot_all_metrics(outfile)
         print(log_message)
         try:
@@ -441,4 +383,4 @@ class BaseModel(metaclass=ABCMeta):
             if did_plot:
                 notify_with_image(outfile, experiment_id=self.experiment_id, message=message)
         except NameError as e:
-            print(e)
+            print(repr(e))

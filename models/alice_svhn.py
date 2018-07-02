@@ -6,9 +6,8 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
 from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
-from models import ALICE
+from models.alice import ALICE
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
-from models.utils import set_trainable, zero_loss
 
 
 class ALICEforSVHN(ALICE):

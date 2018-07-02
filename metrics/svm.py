@@ -1,34 +1,17 @@
-import os
-import random
-from abc import ABCMeta, abstractmethod
-from pprint import pprint
-
 import numpy as np
 from sklearn.svm import LinearSVC, SVC
 from sklearn.model_selection import GridSearchCV, StratifiedShuffleSplit
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.manifold import TSNE
 
-import keras
-from keras.engine.topology import Layer
-from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
-                          LocallyConnected2D, Add,
-                          Lambda, AveragePooling1D, GlobalAveragePooling2D)
-from keras.optimizers import Adam, Adadelta, RMSprop
-from keras import initializers
-from keras import backend as K
-from keras.applications.mobilenet import MobileNet
+from core.metrics import Metric, HistoryMetric
 
-from core.models import BaseModel
+class SVMEval(HistoryMetric):
+    name = 'svm_eval'
+    input_type = 'labelled_embedding'
 
-from .utils import *
-from .layers import *
-
-def svm_eval(x_train, y_train, x_test, y_test):
+    def compute(self, input_data):
+        x_feats, y_labels = input_data
+        x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
 
         # rescale data
         scaler = StandardScaler()
@@ -53,10 +36,15 @@ def svm_eval(x_train, y_train, x_test, y_test):
             score_on_test = grid.score(x_test, y_test)
             scores.append(score_on_test)
 
-        mean = np.mean(scores)
-        return mean
+        return np.mean(scores)
 
-def svm_rbf_eval(x_train, y_train, x_test, y_test):
+class SVMRBFEval(HistoryMetric):
+    name = 'svm_rbf_eval'
+    input_type = 'labelled_embedding'
+
+    def compute(self, input_data):
+        x_feats, y_labels = input_data
+        x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
 
         # rescale data
         scaler = StandardScaler()
@@ -81,25 +69,4 @@ def svm_rbf_eval(x_train, y_train, x_test, y_test):
             score_on_test = grid.score(x_test, y_test)
             scores.append(score_on_test)
 
-        mean = np.mean(scores)
-        return mean
-
-def tsne(x_test, y_test):
-
-    tsne = TSNE(n_components=2,
-                verbose=1, perplexity=30,
-                n_iter=1000)
-    tsne_results = tsne.fit_transform(x_test)
-    return np.concatenate((tsne_results, np.expand_dims(y_test, axis=1)), axis=1)
-
-def lda(x_test, y_test):
-
-    lda = LinearDiscriminantAnalysis(n_components=2)
-    lda_result = lda.fit_transform(x_test, y_test)
-    return np.concatenate((lda_result, np.expand_dims(y_test, axis=1)), axis=1)
-
-def pca(x_test, y_test):
-
-    pca = PCA(n_components=2)
-    pca_result = pca.fit_transform(x_test)
-    return np.concatenate((pca_result, np.expand_dims(y_test, axis=1)), axis=1)
+        return np.mean(scores)

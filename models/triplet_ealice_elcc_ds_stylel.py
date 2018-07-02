@@ -13,7 +13,7 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
 from keras.optimizers import Adam, SGD, RMSprop
 from keras import backend as K
 
-from .base import BaseModel
+from core.models import BaseModel
 import models
 
 from .utils import *

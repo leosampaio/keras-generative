@@ -4,7 +4,7 @@ from keras.layers import Flatten, Dense, Activation, Reshape, BatchNormalization
     LocallyConnected2D
 from keras.optimizers import Adam
 
-from models import ALI
+from models.ali import ALI
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
 from models.utils import set_trainable, zero_loss
 

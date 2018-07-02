@@ -1,16 +1,17 @@
 import keras.backend as K
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
+from keras.layers import (Flatten, Dense, Activation, Reshape,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          Lambda)
 from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
-from models import ALI, Triplet
+from models.triplet_ali import TripletALI
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
-from models.utils import set_trainable, zero_loss
 
-class SVHN_MNIST_TripletALI(TripletAli):
+
+class SVHN_MNIST_TripletALI(TripletALI):
+
     def __init__(self, *args, **kwargs):
         kwargs['name'] = 'ali_for_svhn'
         super().__init__(*args, **kwargs)
@@ -27,7 +28,7 @@ class SVHN_MNIST_TripletALI(TripletAli):
 
         x = Flatten()(x)
 
-        # the output is an average (mu) and std variation (sigma) 
+        # the output is an average (mu) and std variation (sigma)
         # describing the distribution that better describes the input
         mu = Dense(self.z_dims)(x)
         mu = Activation('linear')(mu)
@@ -37,7 +38,7 @@ class SVHN_MNIST_TripletALI(TripletAli):
         # use the generated values to sample random z from the latent space
         concatenated = Concatenate(axis=-1)([mu, sigma])
         output = Lambda(
-            function=lambda x: x[:,:self.z_dims] + (K.exp(x[:,self.z_dims:]) * (K.random_normal(shape=K.shape(x[:,self.z_dims:])))),
+            function=lambda x: x[:, :self.z_dims] + (K.exp(x[:, self.z_dims:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims:])))),
             output_shape=(self.z_dims, )
         )(concatenated)
 
@@ -61,7 +62,6 @@ class SVHN_MNIST_TripletALI(TripletAli):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model([z_input, conditional_input], x, name="Gx")
-
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)
@@ -100,4 +100,3 @@ class SVHN_MNIST_TripletALI(TripletAli):
         opt_d = RMSprop(lr=1e-4)
         opt_g = RMSprop(lr=1e-4)
         return opt_d, opt_g
-    

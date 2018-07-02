@@ -24,7 +24,7 @@ from keras import initializers
 from keras import backend as K
 from keras.applications.mobilenet import MobileNet
 
-from .base import BaseModel
+from core.models import BaseModel
 
 from .utils import *
 from .layers import *
@@ -32,13 +32,6 @@ from .metrics import *
 from . import mmd
 from . import inception_score
 from . import server
-
-try:
-    from .notifyier import *
-except ImportError as e:
-    print(e)
-    print("You did not set a notifyier. Notifications will not be sent anywhere")
-
 
 def triplet_lossfun_creator(margin=1., zdims=256, inverted=False):
     def triplet_lossfun(_, y_pred):
@@ -358,13 +351,13 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         Define all metrics that can be calculated here
     """
 
-    def precompute_and_save_embedding(self, n=10000):
+    def precompute_and_save_labelled_embedding(self, n=10000):
         np.random.seed(14)
         perm = np.random.permutation(len(self.dataset))
         x_data, y_labels = self.dataset.images[perm[:10000]], np.argmax(self.dataset.attrs[perm[:10000]], axis=1)
         np.random.seed()
         x_feats = self.encoder.predict(x_data, batch_size=2000)
-        self.save_precalculated_features('embedding', x_feats, Y=y_labels)
+        self.save_precomputed_features('embedding', x_feats, Y=y_labels)
         return x_feats, y_labels
 
     def precompute_and_save_image_samples(self, n=10000):
@@ -375,28 +368,8 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         generated_images = self.inception_eval_Gx.predict(samples, batch_size=2000)
         generated_images = (generated_images * 255.)
 
-        self.save_precalculated_features('samples', generated_images)
+        self.save_precomputed_features('samples', generated_images)
         return generated_images
-
-    def calculate_svm_eval(self, finished_cgraph_use_event):
-
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
-        if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.precompute_and_save_embedding()
-        finished_cgraph_use_event.set()
-
-        return svm_eval(x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000])
-    svm_eval_metric_type = 'lines'
-
-    def calculate_svm_rbf_eval(self, finished_cgraph_use_event):
-
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
-        if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.precompute_and_save_embedding()
-        finished_cgraph_use_event.set()
-
-        return svm_rbf_eval(x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000])
-    svm_rbf_eval_metric_type = 'lines'
 
     def calculate_tsne(self, finished_cgraph_use_event):
 
@@ -499,6 +472,7 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
 
 class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
+    name = 'topgan_ae_mnist'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)

@@ -1,52 +1,54 @@
 import keras.backend as K
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
+from keras.layers import (Flatten, Dense, Activation, Reshape,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          Lambda)
 from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
-from models import ALI
-from models.ali import (DiscriminatorLossLayer, discriminator_accuracy, 
-    generator_accuracy, GeneratorLossLayer)
+from models.ali import ALI
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
 from models.utils import set_trainable, zero_loss
+
 
 def discriminator_lossfun(y_true, y_pred):
     """
     y_pred[:,0]: p, prediction for pairs (Gx(z), z)
     y_pred[:,1]: q, prediction for pairs (x, Gz(z))
     """
-    p = K.clip(y_pred[:,0], K.epsilon(), 1.0 - K.epsilon())
-    q = K.clip(y_pred[:,1], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:,0]
-    q_true = y_true[:,1]
+    p = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
+    q = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
+    p_true = y_true[:, 0]
+    q_true = y_true[:, 1]
 
     q_error = -K.mean(K.log(K.abs(q_true - q)))
     p_error = -K.mean(K.log(K.abs(p - p_true)))
 
     return q_error + p_error
 
+
 def generator_lossfun(y_true, y_pred):
     """
     y_pred[:,0]: p, prediction for pairs (Gx(z), z)
     y_pred[:,1]: q, prediction for pairs (x, Gz(z))
     """
-    p = K.clip(y_pred[:,0], K.epsilon(), 1.0 - K.epsilon())
-    q = K.clip(y_pred[:,1], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:,0]
-    q_true = y_true[:,1]
+    p = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
+    q = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
+    p_true = y_true[:, 0]
+    q_true = y_true[:, 1]
 
     q_error = -K.mean(K.log(K.abs(p_true - q)))
     p_error = -K.mean(K.log(K.abs(p - q_true)))
 
     return q_error + p_error
 
+
 class ALIforSVHN(ALI):
     """
     Based on the original ALI paper arch. Experiment on SVHN.
     See Table 4 on the paper for details
     """
+
     def __init__(self, *args, **kwargs):
         kwargs['name'] = 'ali_for_svhn'
         super().__init__(*args, **kwargs)
@@ -63,7 +65,7 @@ class ALIforSVHN(ALI):
 
         x = Flatten()(x)
 
-        # the output is an average (mu) and std variation (sigma) 
+        # the output is an average (mu) and std variation (sigma)
         # describing the distribution that better describes the input
         mu = Dense(self.z_dims)(x)
         mu = Activation('linear')(mu)
@@ -73,7 +75,7 @@ class ALIforSVHN(ALI):
         # use the generated values to sample random z from the latent space
         concatenated = Concatenate(axis=-1)([mu, sigma])
         output = Lambda(
-            function=lambda x: x[:,:self.z_dims] + (K.exp(x[:,self.z_dims:]) * (K.random_normal(shape=K.shape(x[:,self.z_dims:])))),
+            function=lambda x: x[:, :self.z_dims] + (K.exp(x[:, self.z_dims:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims:])))),
             output_shape=(self.z_dims, )
         )(concatenated)
 
@@ -95,7 +97,6 @@ class ALIforSVHN(ALI):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model(z_input, x, name="Gx")
-
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)
@@ -134,18 +135,20 @@ class ALIforSVHN(ALI):
 
         assert self.f_D is not None
 
-        p = self.f_D([self.f_Gx(input_z), input_z]) # for pairs (Gx(z), z)
-        q = self.f_D([input_x, self.f_Gz(input_x)]) # for pairs (x, Gz(x))
+        p = self.f_D([self.f_Gx(input_z), input_z])  # for pairs (Gx(z), z)
+        q = self.f_D([input_x, self.f_Gz(input_x)])  # for pairs (x, Gz(x))
 
         concatenated = Concatenate(axis=-1)([p, q])
         return Model([input_x, input_z], concatenated, name='ali')
 
     def build_model(self):
 
-        self.f_Gz = self.build_Gz() # Moriarty, the encoder
-        self.f_Gx = self.build_Gx() # Irene, the decoder
+        self.f_Gz = self.build_Gz()  # Moriarty, the encoder
+        self.f_Gx = self.build_Gx()  # Irene, the decoder
         self.f_D = self.build_D()   # Sherlock, the detective
-        self.f_Gz.summary(); self.f_Gx.summary(); self.f_D.summary()
+        self.f_Gz.summary()
+        self.f_Gx.summary()
+        self.f_D.summary()
 
         opt_d = RMSprop(lr=1e-4)
         opt_g = RMSprop(lr=1e-4)
@@ -164,12 +167,12 @@ class ALIforSVHN(ALI):
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=opt_g, loss=generator_lossfun)
 
-        self.dis_trainer.summary(); self.gen_trainer.summary()
+        self.dis_trainer.summary()
+        self.gen_trainer.summary()
 
         # Store trainers
         self.store_to_save('dis_trainer')
         self.store_to_save('gen_trainer')
-
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
         # self.swap_weights()

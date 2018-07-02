@@ -14,7 +14,7 @@ from keras.optimizers import Adam, SGD, RMSprop
 from keras import backend as K
 import tensorflow as tf
 
-from .base import BaseModel
+from core.models import BaseModel
 import models
 
 from .utils import *

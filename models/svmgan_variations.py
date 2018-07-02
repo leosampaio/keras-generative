@@ -16,7 +16,7 @@ from keras import initializers
 from keras import backend as K
 from keras.applications.mobilenet import MobileNet
 
-from .base import BaseModel
+from core.models import BaseModel
 
 from .utils import *
 from .layers import *

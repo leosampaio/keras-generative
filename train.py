@@ -12,7 +12,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import matplotlib
 matplotlib.use('Agg')
 
-from models import models
+import models
 from datasets import load_dataset
 
 
@@ -63,11 +63,7 @@ def main():
     # load datasets
     dataset = load_dataset(args.dataset)
 
-    # Construct model
-    if args.model not in models:
-        raise Exception('Unknown model:', args.model)
-
-    model = models[args.model](
+    model = models.get_model_by_name(args.model)(
         input_shape=dataset.shape[1:],
         **vars(args)
     )

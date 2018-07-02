@@ -1,16 +1,19 @@
 import keras.backend as K
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
+from keras.layers import (Flatten, Dense, Activation, Reshape,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          Lambda)
 from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
-from models import ALI, ALIforSVHN
+from models.ali import ALI
+from models.ali_svhn import ALIforSVHN
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
 from models.utils import set_trainable, zero_loss
 
+
 class ALIforMNIST(ALI):
+
     def __init__(self, *args, **kwargs):
         kwargs['name'] = 'ali_for_mnist'
         super().__init__(*args, **kwargs)
@@ -25,7 +28,7 @@ class ALIforMNIST(ALI):
 
         x = Flatten()(x)
 
-        # the output is an average (mu) and std variation (sigma) 
+        # the output is an average (mu) and std variation (sigma)
         # describing the distribution that better describes the input
         mu = Dense(self.z_dims)(x)
         mu = Activation('linear')(mu)
@@ -35,7 +38,7 @@ class ALIforMNIST(ALI):
         # use the generated values to sample random z from the latent space
         concatenated = Concatenate(axis=-1)([mu, sigma])
         output = Lambda(
-            function=lambda x: x[:,:self.z_dims] + (K.exp(x[:,self.z_dims:]) * (K.random_normal(shape=K.shape(x[:,self.z_dims:])))),
+            function=lambda x: x[:, :self.z_dims] + (K.exp(x[:, self.z_dims:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims:])))),
             output_shape=(self.z_dims, )
         )(concatenated)
 
@@ -57,7 +60,6 @@ class ALIforMNIST(ALI):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model(z_input, x)
-
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)
@@ -89,14 +91,15 @@ class ALIforMNIST(ALI):
         opt_g = RMSprop(lr=1e-4)
         return opt_d, opt_g
 
+
 class ConditionalALIforMNIST(ALIforMNIST):
     """
     Conditional version
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.name = "{}_r{}".format('ali_for_mnist_conditional', self.run_id)
-
 
     def build_Gx(self):
         z_input = Input(shape=(self.z_dims,))
@@ -116,7 +119,6 @@ class ConditionalALIforMNIST(ALIforMNIST):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model([z_input, conditional_input], x)
-
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)
@@ -145,6 +147,7 @@ class ConditionalALIforMNIST(ALIforMNIST):
 
         return Model([x_input, z_input, conditional_input], xz)
 
+
 class ALIforSharedExp(ALI):
 
     def __init__(self, *args, **kwargs):
@@ -170,16 +173,16 @@ class ALIforSharedExp(ALI):
 
         x = Flatten()(x)
 
-        mu = Dense(self.z_dims//2)(x)
+        mu = Dense(self.z_dims // 2)(x)
         mu = Activation('linear')(mu)
-        sigma = Dense(self.z_dims//2)(x)
+        sigma = Dense(self.z_dims // 2)(x)
         sigma = Activation('linear')(sigma)
 
         # use the generated values to sample random z from the latent space
         concatenated = Concatenate(axis=-1)([mu, sigma])
         output = Lambda(
-            function=lambda x: x[:, :self.z_dims//2] + (K.exp(x[:, self.z_dims//2:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims//2:])))),
-            output_shape=(self.z_dims//2, )
+            function=lambda x: x[:, :self.z_dims // 2] + (K.exp(x[:, self.z_dims // 2:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims // 2:])))),
+            output_shape=(self.z_dims // 2, )
         )(concatenated)
 
         return Model(x_input, concatenated)
@@ -188,8 +191,10 @@ class ALIforSharedExp(ALI):
         z_input = Input(shape=(self.z_dims,))
         orig_channels = self.input_shape[2]
 
-        x = Dense(512)(z_input); x = LeakyReLU(0.01)(x)
-        x = Dense(512)(x); x = LeakyReLU(0.01)(x)
+        x = Dense(512)(z_input)
+        x = LeakyReLU(0.01)(x)
+        x = Dense(512)(x)
+        x = LeakyReLU(0.01)(x)
 
         x = Reshape((4, 4, 32))(x)
 

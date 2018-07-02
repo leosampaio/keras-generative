@@ -7,10 +7,10 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
 from keras.optimizers import Adam, SGD, RMSprop
 import numpy as np
 
-from models import ALICE, ExplicitALICE
+from models.alice import ALICE, ExplicitALICE
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal, ResLayer, ResDeconvLayer
 from models.utils import set_trainable, zero_loss
-from models import ALIforSharedExp, ALICEforSVHN
+from models.ali_mnist import ALIforSharedExp
 
 
 class ShareableExplicitALICEforSharedExp(ExplicitALICE):
