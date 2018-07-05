@@ -13,5 +13,5 @@ all_subclasses = Metric.__subclasses__() + [s for ss in [s.__subclasses__() for 
 metrics_by_name = {cls.name: cls for cls in all_subclasses if hasattr(cls, 'name')}
 
 
-def build_metric_by_name(metric_name):
-    return metrics_by_name[metric_name]()
+def build_metric_by_name(metric_name, **kwargs):
+    return metrics_by_name[metric_name](**kwargs)

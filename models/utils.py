@@ -254,7 +254,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                         label = metric_names[ii][jj]
                     else:
                         label = "line_%01d" % jj
-                    line, = ax.plot(iterations_list[ii], submetric,
+                    line, = ax.plot(list(range(0, len(submetric), iterations_list[ii])), submetric,
                                     color='C%d' % jj,
                                     label=label)
                     lines.append(line)
@@ -263,7 +263,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                     label = metric_names[ii]
                 else:
                     label = "line_01"
-                line, = ax.plot(iterations_list[ii], metric, color='C0',
+                line, = ax.plot(list(range(0, len(metric), iterations_list[ii])), metric, color='C0',
                                 label=label)
                 lines = [line]
             if ((not isinstance(legend, (list, tuple)) and legend) or
@@ -274,19 +274,19 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
             ax = plt.subplot(current_cell)
             ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
             cmap = cm.tab10
-            category_labels = metric[-1][..., 2]
+            category_labels = metric[..., 2]
             norm = colors.Normalize(vmin=np.min(category_labels), vmax=np.max(category_labels))
             cmapper = cm.ScalarMappable(norm=norm, cmap=cmap)
             mapped_colors = cmapper.to_rgba(category_labels)
             unique_labels = list(set(category_labels))
-            lines = ax.scatter(metric[-1][..., 0], metric[-1][..., 1],
+            lines = ax.scatter(metric[..., 0], metric[..., 1],
                                color=mapped_colors,
                                label=unique_labels)
             patch = mpatches.Patch(color='silver', label=metric_names[ii])
             ax.legend(handles=[patch], prop={'size': 20})
 
         elif types[ii] == 'image-grid':
-            imgs = metric[-1]
+            imgs = metric
             n_images = len(imgs)
             inner_grid_width = int(np.sqrt(n_images))
             inner_grid = GridSpecFromSubplotSpec(inner_grid_width, inner_grid_width, current_cell, wspace=0.1, hspace=0.1)

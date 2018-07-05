@@ -84,13 +84,13 @@ class BaseModel(metaclass=ABCMeta):
         # generic metric setup - start
         if kwargs.get('metrics') is not None:
             desired_metrics = kwargs.get('metrics')
-            self.metrics = {m: metrics.build_metric_by_name(m) for m in desired_metrics}
+            self.metrics = {m: metrics.build_metric_by_name(m, experiment_id=self.experiment_id, **kwargs) for m in desired_metrics}
         else:
             self.metrics = None
         # generic metric setup - end
 
     def get_experiment_id(self):
-        id = "{}_zdim{}_edim{}".format(self.name, self.z_dims, self.embedding_size)
+        id = "{}_zdim{}".format(self.name, self.z_dims)
         for l, loss in self.losses.items():
             id = "{}_L{}{}{}{}".format(id, l.replace('_', ''), loss.weight,
                                        loss.weight_control_type.replace('-', ''),
@@ -128,7 +128,6 @@ class BaseModel(metaclass=ABCMeta):
         print('\n\n--- START TRAINING ---\n')
         num_data = len(dataset)
         self.batchsize = batchsize
-        self.make_predict_functions()
         for e in range(self.last_epoch, epochs):
             perm = np.random.permutation(num_data)
             start_time = time.time()
@@ -204,14 +203,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def update_loss_history(self, new_losses):
         for l, loss in self.losses.items():
-            loss.update_history(new_losses[l])
-
-    def make_predict_functions(self):
-        """
-        implement `_make_predict_function()` calls here if you plan on making
-        predictions on multiple threads
-        """
-        pass
+            loss.update_history(new_losses[l]/self.batchsize)
 
     def make_batch(self, dataset, indx):
         '''
@@ -273,10 +265,10 @@ class BaseModel(metaclass=ABCMeta):
         data = self.load_precomputed_features_if_they_exist(data_type)
         if not data:
             try:
-                gather_func = getattr(self, "precompute_and_save_{}".format(data_type))
+                gather_func = getattr(self, "compute_{}".format(data_type))
             except AttributeError:
                 raise AttributeError("One of your metrics requires a "
-                                     "precompute_and_save_{} method".format(data_type))
+                                     "compute_{} method".format(data_type))
             data = gather_func()
         return data
 
@@ -316,7 +308,7 @@ class BaseModel(metaclass=ABCMeta):
                 names.append(subnames)
             else:
                 metrics.append(self.losses[l].history)
-                iters.append(list(range(len(self.losses[l].history))))
+                iters.append(1)
                 names.append(l)
         return metrics, iters, names, ['lines'] * len(metrics)
 
@@ -327,15 +319,15 @@ class BaseModel(metaclass=ABCMeta):
             metrics.append(np.array(loss.weight_history) + contrast_increment)
             names.append(l)
             contrast_increment += 0.005
-        iters = list(range(len(metrics[0])))
-        return [metrics], [iters], [names], ['lines']
+        return [metrics], [1], [names], ['lines']
 
     def get_metrics_for_plot(self):
         metrics, iters, names, types = [], [], [], []
         for m, metric in self.metrics.items():
-            metrics.append(metric.get_data_for_plot())
+            data = metric.get_data_for_plot()
+            metrics.append(data)
             names.append(m)
-            iters.append(list(range(len(metric.get_data_for_plot()))))
+            iters.append(self.notify_every)
             types.append(metric.plot_type)
         return metrics, iters, names, types
 

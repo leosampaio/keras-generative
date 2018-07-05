@@ -3,7 +3,8 @@ from sklearn.svm import LinearSVC, SVC
 from sklearn.model_selection import GridSearchCV, StratifiedShuffleSplit
 from sklearn.preprocessing import StandardScaler
 
-from core.metrics import Metric, HistoryMetric
+from core.metrics import HistoryMetric
+
 
 class SVMEval(HistoryMetric):
     name = 'svm_eval'
@@ -37,6 +38,7 @@ class SVMEval(HistoryMetric):
             scores.append(score_on_test)
 
         return np.mean(scores)
+
 
 class SVMRBFEval(HistoryMetric):
     name = 'svm_rbf_eval'

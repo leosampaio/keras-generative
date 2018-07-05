@@ -28,10 +28,10 @@ from core.models import BaseModel
 
 from .utils import *
 from .layers import *
-from .metrics import *
 from . import mmd
 from . import inception_score
 from . import server
+
 
 def triplet_lossfun_creator(margin=1., zdims=256, inverted=False):
     def triplet_lossfun(_, y_pred):
@@ -127,7 +127,6 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         # train both networks
         ld = {}  # loss dictionary
-        # _, _, d_triplet, ae_loss = self.ae_triplet_trainer.train_on_batch(input_data, label_data)
         _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'] = self.dis_trainer.train_on_batch(input_data, label_data)
         _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
         if self.losses['d_loss'].last_value < 0.1:
@@ -143,8 +142,6 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         input_noise = Input(shape=self.input_shape)
         input_x_perm = Input(shape=(1,), dtype='int64')
         input_z = Input(shape=(self.z_dims,))
-
-        assert self.f_D is not None
 
         clipping_layer = Lambda(lambda x: K.clip(x, 0., 1.))
 
@@ -179,20 +176,10 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         # build discriminator
         self.dis_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
-        set_trainable(self.f_D, not self.isolate_d_classifier)
-        set_trainable(self.aux_classifier, True)
+        set_trainable(self.f_D, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
                                  loss=[loss_d, triplet_d_loss, 'mse'],
                                  loss_weights=[self.losses['d_loss'].backend, self.losses['d_triplet'].backend, self.losses['ae_loss'].backend])
-
-        # build autoencoder+triplet
-        # self.ae_triplet_trainer = self.build_trainer()
-        # set_trainable(self.f_Gx, False)
-        # set_trainable(self.f_D, True)
-        # set_trainable(self.aux_classifier, not self.isolate_d_classifier)
-        # self.ae_triplet_trainer.compile(optimizer=self.optimizers["opt_ae"],
-        #                                 loss=[loss_d, triplet_d_loss, 'mse'],
-        #                                 loss_weights=[0., self.losses['d_triplet'].backend, self.losses['ae_loss'].backend])
 
         # build generators
         self.gen_trainer = self.build_trainer()
@@ -205,9 +192,6 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
         # store trainers
         self.store_to_save('gen_trainer')
         self.store_to_save('dis_trainer')
-
-        self.build_mmd_calc_model()
-        self.build_inception_eval_model()
 
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr)
@@ -296,13 +280,6 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         return Model(x_input, [x_embedding, discriminator, x_hat])
 
-    def make_predict_functions(self):
-        self.encoder._make_predict_function()
-        self.decoder._make_predict_function()
-        self.aux_classifier._make_predict_function()
-        self.f_D._make_predict_function()
-        self.f_Gx._make_predict_function()
-
     def build_Gx(self):
         z_input = Input(shape=(self.z_dims,))
         orig_channels = self.input_shape[2]
@@ -326,149 +303,49 @@ class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
 
         return Model(z_input, x)
 
-    def build_mmd_calc_model(self):
-
-        x_ph = tf.placeholder(tf.float32, shape=[None] + list(self.input_shape), name='mmd_x')
-        x_hat_ph = tf.placeholder(tf.float32, shape=[None, self.input_shape[0], self.input_shape[1], 3], name='mmd_x_hat')
-        if self.input_shape[2] == 1:
-            x_ph = tf.image.grayscale_to_rgb(x_ph)
-        x_flat = K.batch_flatten(x_ph)
-        x_hat_flat = K.batch_flatten(x_hat_ph)
-        self.mmd_computer = tf.log(mmd.rbf_mmd2(x_flat, x_hat_flat))
-
-    def build_inception_eval_model(self):
-        input_z = Input(shape=(self.z_dims,))
-
-        x_hat = self.f_Gx(input_z)
-
-        if self.input_shape[2] == 1:
-            x_hat = Lambda(lambda x: tf.image.grayscale_to_rgb(x))(x_hat)
-
-        self.inception_eval_Gx = Model(input_z, x_hat)
-        self.inception_eval_Gx._make_predict_function()
-
     """
-        Define all metrics that can be calculated here
+        Define computation of metrics inputs
     """
 
-    def precompute_and_save_labelled_embedding(self, n=10000):
+    def compute_labelled_embedding(self, n=10000):
         np.random.seed(14)
         perm = np.random.permutation(len(self.dataset))
         x_data, y_labels = self.dataset.images[perm[:10000]], np.argmax(self.dataset.attrs[perm[:10000]], axis=1)
         np.random.seed()
         x_feats = self.encoder.predict(x_data, batch_size=2000)
-        self.save_precomputed_features('embedding', x_feats, Y=y_labels)
+        self.save_precomputed_features('labelled_embedding', x_feats, Y=y_labels)
         return x_feats, y_labels
 
-    def precompute_and_save_image_samples(self, n=10000):
+    def compute_generated_and_real_samples(self, n=10000):
+        np.random.seed(14)
+        samples = np.random.normal(size=(n, self.z_dims))
+        perm = np.random.permutation(len(self.dataset))
+        np.random.seed()
+
+        generated_images = self.f_Gx.predict(samples, batch_size=2000)
+        images_from_set = self.dataset.images[perm[:n]]
+
+        self.save_precomputed_features('generated_and_real_samples', generated_images, Y=images_from_set)
+        return images_from_set, generated_images
+
+    def compute_generated_image_samples(self, n=36):
         np.random.seed(14)
         samples = np.random.normal(size=(n, self.z_dims))
         np.random.seed()
 
-        generated_images = self.inception_eval_Gx.predict(samples, batch_size=2000)
-        generated_images = (generated_images * 255.)
-
-        self.save_precomputed_features('samples', generated_images)
+        generated_images = self.f_Gx.predict(samples, batch_size=n)
         return generated_images
 
-    def calculate_tsne(self, finished_cgraph_use_event):
-
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
-        if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.precompute_and_save_embedding()
-        finished_cgraph_use_event.set()
-
-        return tsne(x_feats[:1000], y_labels[:1000])
-    tsne_metric_type = 'scatter'
-
-    def calculate_lda(self, finished_cgraph_use_event):
-
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
-        if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.precompute_and_save_embedding()
-        finished_cgraph_use_event.set()
-
-        return lda(x_feats[:1000], y_labels[:1000])
-    lda_metric_type = 'scatter'
-
-    def calculate_pca(self, finished_cgraph_use_event):
-
-        x_feats, y_labels = self.load_precalculated_features_if_they_exist('embedding')
-        if not isinstance(x_feats, np.ndarray):
-            x_feats, y_labels = self.precompute_and_save_embedding()
-        finished_cgraph_use_event.set()
-
-        return pca(x_feats[:1000], y_labels[:1000])
-    pca_metric_type = 'scatter'
-
-    def calculate_samples(self, finished_cgraph_use_event):
-        np.random.seed(14)
-        samples = np.random.normal(size=(36, self.z_dims))
-        np.random.seed()
-        imgs = self.f_Gx.predict(samples)
-        if imgs.shape[3] == 1:
-            imgs = np.squeeze(imgs, axis=(3,))
-        finished_cgraph_use_event.set()
-        return imgs
-    samples_metric_type = 'image-grid'
-
-    def calculate_ae_rec(self, finished_cgraph_use_event):
+    def compute_reconstruction_samples(self, n=18):
         np.random.seed(14)
         perm = np.random.permutation(len(self.dataset))
-        imgs_from_dataset = self.dataset.images[perm[:18]]
+        imgs_from_dataset = self.dataset.images[perm[:n]]
         noise = np.random.normal(scale=self.input_noise, size=imgs_from_dataset.shape)
         imgs_from_dataset += noise
         np.random.seed()
-
-        imgs = np.zeros((36,) + self.input_shape)
         encoding = self.encoder.predict(imgs_from_dataset)
         x_hat = self.decoder.predict(encoding)
-        imgs[0::2] = imgs_from_dataset
-        imgs[1::2] = x_hat
-        imgs = np.clip(imgs, 0., 1.)
-        if imgs.shape[3] == 1:
-            imgs = np.squeeze(imgs, axis=(3,))
-        finished_cgraph_use_event.set()
-        return imgs
-    ae_rec_metric_type = 'image-grid'
-
-    def calculate_mmd(self, finished_cgraph_use_event):
-        x_hat = self.load_precalculated_features_if_they_exist('samples', has_labels=False)
-        if not isinstance(x_hat, np.ndarray):
-            x_hat = self.precompute_and_save_image_samples()
-        finished_cgraph_use_event.set()
-
-        np.random.seed(14)
-        perm = np.random.permutation(len(self.dataset))
-        np.random.seed()
-
-        imgs_from_dataset = self.dataset.images[perm[:10000]] * 255.
-        mmd = K.get_session().run(self.mmd_computer, feed_dict={'mmd_x:0': imgs_from_dataset, 'mmd_x_hat:0': x_hat})
-
-        return mmd
-    mmd_metric_type = 'lines'
-
-    def calculate_inception_score(self, finished_cgraph_use_event):
-        x_hat = self.load_precalculated_features_if_they_exist('samples', has_labels=False)
-        if not isinstance(x_hat, np.ndarray):
-            x_hat = self.precompute_and_save_image_samples()
-        finished_cgraph_use_event.set()
-
-        mean, std = inception_score.get_inception_score(x_hat)
-        return mean
-    inception_score_metric_type = 'lines'
-
-    def calculate_s_inception_score(self, finished_cgraph_use_event):
-        filename = os.path.join(
-            self.tmp_out_dir,
-            "precalculated_features_{}_e{}.h5".format('samples', self.current_epoch))
-        if not os.path.exists(filename):
-            _ = self.precompute_and_save_image_samples()
-        finished_cgraph_use_event.set()
-
-        mean, std = server.ask_server_for_inception_score(filename)
-        return mean
-    s_inception_score_metric_type = 'lines'
+        return imgs_from_dataset, x_hat
 
 
 class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):

@@ -5,7 +5,7 @@ from abc import ABCMeta, abstractmethod
 class Metric(object, metaclass=ABCMeta):
     metrics_by_name = {}
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.thread = threading.Thread()
         self.thread.start()
 
@@ -54,7 +54,7 @@ class Metric(object, metaclass=ABCMeta):
 class HistoryMetric(Metric):
     plot_type = 'lines'
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
         self.history = []
         self.last_value = None
@@ -64,7 +64,7 @@ class HistoryMetric(Metric):
             result = self.compute(input_data)
         except Exception as e:
             print("Exception while computing metrics: {}".format(repr(e)))
-            if last_value is None:
+            if self.last_value is None:
                 result = 0
             else:
                 result = self.last_value
@@ -88,7 +88,7 @@ class HistoryMetric(Metric):
 class ProjectionMetric(Metric):
     plot_type = 'scatter'
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
         self.current_projection = None
 
@@ -98,7 +98,7 @@ class ProjectionMetric(Metric):
         except Exception as e:
             print("Exception while computing metrics: {}".format(repr(e)))
             if not self.current_projection:
-                result = [[0.], [0.]]
+                result = [[[0.], [0.], [0.]]]
             else:
                 result = self.current_projection
         self.current_projection = result
@@ -120,7 +120,7 @@ class ProjectionMetric(Metric):
 class ImageSamplesMetric(Metric):
     plot_type = 'image-grid'
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
         self.current_images = None
 
