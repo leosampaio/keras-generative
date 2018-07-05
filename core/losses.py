@@ -81,3 +81,9 @@ class Loss(object):
         self.last_value = new_loss
         self.history.append(new_loss)
         self.weight_history.append(self.current_weight)
+
+    def get_mean_of_latest(self, n=1000):
+        if len(self.history) > n:
+            return np.mean(self.history[-n:])
+        else:
+            return np.mean(self.history)

@@ -143,14 +143,11 @@ class BaseModel(metaclass=ABCMeta):
                 # slice batch out of dataset
                 x_batch, y_batch = self.make_batch(dataset, indx)
 
-                # add optional input noise that decreases over time
-                x_batch = add_input_noise(x_batch, curr_epoch=e, total_epochs=epochs, start_noise=self.input_noise)
-
                 # finally, train and report status
                 losses = self.train_on_batch(x_batch, y_batch=y_batch)
                 self.update_loss_history(losses)
 
-                print_current_progress(e, b, bsize, len(dataset), losses, elapsed_time=time.time() - start_time)
+                print_current_progress(e, b, bsize, len(dataset), self.losses, elapsed_time=time.time() - start_time)
 
                 # check for collapse scenario where G and D losses are equal
                 did_collapse = self.did_collapse(losses)
@@ -167,6 +164,7 @@ class BaseModel(metaclass=ABCMeta):
                     print('\nFinish testing: %s' % self.experiment_id)
                     return
 
+            print()
             # plot samples and losses and send notification if it's checkpoint time
             if ((self.current_epoch) % self.checkpoint_every) == 0:
                 self.save_model(self.wgt_out_dir, self.current_epoch)

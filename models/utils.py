@@ -50,22 +50,22 @@ def time_format(t):
     m = int(m)
     s = int(s)
     if m == 0:
-        return '%d sec' % s
+        return '%ds' % s
     else:
-        return '%d min %d sec' % (m, s)
+        return '%dm%ds' % (m, s)
 
 
 def print_current_progress(current_epoch, current_batch_index, batch_size, dataset_length, losses, elapsed_time):
     ratio = 100.0 * (current_batch_index + batch_size) / dataset_length
-    status_string = "Epoch #{:04.0f} | {:06.0f} / {:06.0f} ({:6.2f}% )".format(current_epoch + 1, current_batch_index + batch_size, dataset_length, ratio)
+    status_string = "E{:03.0f}|{:06.0f}/{:06.0f}({:04.1f}%)".format(current_epoch + 1, current_batch_index + batch_size, dataset_length, ratio)
 
     for k, l in losses.items():
-        status_string = "{} | {} = {:8.6f}".format(status_string, k, l)
-        assert not np.isnan(l)
+        status_string = "{}|{}={:5.4f}".format(status_string, k, l.last_value)
+        assert not np.isnan(l.last_value)
 
     # compute ETA
     eta = elapsed_time / (current_batch_index + batch_size) * (dataset_length - (current_batch_index + batch_size))
-    status_string = "{} | ETA: {}".format(status_string, time_format(eta))
+    status_string = "{}|ETA:{}".format(status_string, time_format(eta))
     print(status_string, end='\r')
     sys.stdout.flush()
 

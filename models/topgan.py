@@ -112,11 +112,11 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         ld = {}  # loss dictionary
         _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'] = self.dis_trainer.train_on_batch(input_data, label_data)
         _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
-        if self.losses['d_loss'].last_value < 0.1:
-            _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
-        if self.losses['d_loss'].last_value < 0.001:
-            for i in range(0, 5):
-                _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
+        # if self.losses['d_triplet'].get_mean_of_latest() < 1e-5:
+        #     _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
+        # if self.losses['d_triplet'].get_mean_of_latest() == 0.:
+        #     for i in range(0, 5):
+        #         _, ld['g_loss'], ld['g_triplet'], _ = self.gen_trainer.train_on_batch(input_data, label_data)
 
         return ld
 
@@ -170,7 +170,7 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
                                  loss=[loss_g, triplet_g_loss, 'mse'],
-                                 loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, 0.])
+                                 loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, self.losses['ae_loss'].backend])
 
         # store trainers
         self.store_to_save('gen_trainer')
