@@ -2,14 +2,12 @@ from collections import namedtuple
 import keras.backend as K
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
-import numpy as np
+from keras.optimizers import Adam
 
-from models.alice import ALICE, ExplicitALICE
+from models.alice import ExplicitALICE
 from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal, ResLayer, ResDeconvLayer
-from models.utils import set_trainable, zero_loss
 from models.ali_mnist import ALIforSharedExp
 
 
@@ -87,8 +85,10 @@ class ShareableExplicitALICEforSharedExp(ExplicitALICE):
         z_input = Input(shape=(self.z_dims,))
         orig_channels = self.input_shape[2]
 
-        x = Dense(512)(z_input); x = LeakyReLU(0.1)(x)
-        x = Dense(512)(x); x = LeakyReLU(0.1)(x)
+        x = Dense(512)(z_input)
+        x = LeakyReLU(0.1)(x)
+        x = Dense(512)(x)
+        x = LeakyReLU(0.1)(x)
 
         x = Reshape((4, 4, 32))(x)
 

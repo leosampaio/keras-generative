@@ -8,7 +8,7 @@ import keras
 from keras.engine.topology import Layer
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           Lambda)
 from keras.optimizers import Adam, SGD, RMSprop
 from keras import backend as K

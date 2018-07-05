@@ -27,93 +27,6 @@ def set_trainable(model, train):
             l.trainable = train
 
 
-def zero_loss(y_true, y_pred):
-    return K.zeros_like(y_true)
-
-
-def slerp(val, low, high):
-    """Spherical interpolation. val has a range of 0 to 1."""
-    if val <= 0:
-        return low
-    elif val >= 1:
-        return high
-    elif np.allclose(low, high):
-        return low
-    omega = np.arccos(np.dot(low / np.linalg.norm(low), high / np.linalg.norm(high)))
-    so = np.sin(omega)
-    return np.sin((1.0 - val) * omega) / so * low + np.sin(val * omega) / so * high
-
-
-def interpolate_vectors(a, b, steps=10):
-    interp = np.zeros((steps,) + a.shape)
-    for i in range(a.shape[0]):
-        for step in range(steps - 1):
-            interp[step][i] = a[i] + (b[i] - a[i]) / steps * step
-    interp[steps - 1] = b
-    return interp
-
-
-class PlotReconstructions(Callback):
-
-    def __init__(self, encoder, decoder, z_dim=256, examples_to_plot=10):
-        super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-        self.examples_to_plot = examples_to_plot
-        self.z_dim = z_dim
-
-        if not os.path.isdir('aae'):
-            os.makedirs('aae')
-
-    def on_epoch_end(self, epoch, logs=None):
-        data = self.validation_data[0][:self.examples_to_plot]
-        decoded_imgs = self.model.predict(data)
-        random_z = np.random.normal(size=(self.examples_to_plot, self.z_dim))
-        random_imgs = self.decoder.predict(random_z)
-
-        # interpolations
-        a = data[0]
-        b = data[1]
-        encodings = self.encoder.predict(np.array([a, b]).reshape((2,) + a.shape))
-        interp = interpolate_vectors(encodings[0], encodings[1])
-        decoded_interp = self.decoder.predict(interp)
-
-        plot_reconstructions(data, decoded_imgs, random_imgs, decoded_interp, 'aae/aae_{}.png'.format(epoch))
-
-
-def plot_reconstructions(x, y, random_imgs, interpolations, plotname):
-    n = x.shape[0]
-    img_size = x.shape[1]
-    plt.figure(figsize=(15, 4))
-    for i in range(n):
-        # display original
-        ax = plt.subplot(4, n, i + 1)
-        plt.imshow(x[i].reshape((img_size, img_size, 3)))
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-        # display reconstruction
-        ax = plt.subplot(4, n, i + 1 + n)
-        plt.imshow(y[i].reshape((img_size, img_size, 3)))
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-        # display random images
-        ax = plt.subplot(4, n, i + 1 + 2 * n)
-        plt.imshow(random_imgs[i].reshape((img_size, img_size, 3)))
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-        # interpolation
-        ax = plt.subplot(4, n, i + 1 + 3 * n)
-        plt.imshow(interpolations[i].reshape((img_size, img_size, 3)))
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
-
-    plt.savefig(plotname)
-    plt.close()
-
-
 def get_gradient_norm_func(model):
     # https://github.com/keras-team/keras/issues/2226
     weights = model.trainable_weights  # weight tensors
@@ -153,7 +66,7 @@ def print_current_progress(current_epoch, current_batch_index, batch_size, datas
     # compute ETA
     eta = elapsed_time / (current_batch_index + batch_size) * (dataset_length - (current_batch_index + batch_size))
     status_string = "{} | ETA: {}".format(status_string, time_format(eta))
-    print(status_string)
+    print(status_string, end='\r')
     sys.stdout.flush()
 
 
@@ -176,12 +89,6 @@ def add_input_noise(x_batch, curr_epoch, total_epochs, start_noise):
     else:
         noised_batch = x_batch + noise * noise_factor
     return noised_batch
-
-
-def add_input_noise_to_autoencoder(x_batch):
-    batchsize = x_batch.shape
-    noise = np.random.normal(size=batchsize)
-    return x_batch + noise * 0.0
 
 
 def smooth_binary_labels(batchsize, smoothing=0.0, one_sided_smoothing=True):
@@ -237,7 +144,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
     elif hspace is not None:
         gs.update(hspace=hspace)
 
-    argsort_of_metric_names = np.argsort([m[0] if isinstance(m, (list, tuple)) else m for m in metric_names]) # keeps order between runs
+    argsort_of_metric_names = np.argsort([m[0] if isinstance(m, (list, tuple)) else m for m in metric_names])  # keeps order between runs
     for ii in argsort_of_metric_names:
 
         metric = metrics_list[ii]
@@ -298,7 +205,6 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                     inner_ax.imshow(imgs[i, :, :], cmap='gray', interpolation='none', vmin=0.0, vmax=1.0)
                 inner_ax.axis('off')
 
-        
         if ax is not None:
             if x_label is not None and not isinstance(x_label, (list, tuple)):
                 ax.set_xlabel(x_label, color='k')

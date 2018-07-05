@@ -1,14 +1,13 @@
 import keras.backend as K
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.optimizers import RMSprop
 import numpy as np
 
 from models.ali import ALI
-from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
-from models.utils import set_trainable, zero_loss
+from models.layers import BasicConvLayer, BasicDeconvLayer
 
 
 def discriminator_lossfun(y_true, y_pred):

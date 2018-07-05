@@ -1,16 +1,9 @@
 import os
-import random
-from abc import ABCMeta, abstractmethod
-
 import numpy as np
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-                          Lambda, Add)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.layers import Concatenate
+from keras.optimizers import RMSprop
 from keras import backend as K
 
 from core.models import BaseModel
@@ -27,11 +20,13 @@ def latent_cycle_mae_loss(y_true, y_pred):
     a, b = y_pred[..., :y_pred.shape[-1] // 2], y_pred[..., (y_pred.shape[-1] // 2):]
     return K.mean(K.abs(a - b), axis=-1)
 
+
 def gram_matrix(x):
     s = K.shape(x)
     x = K.batch_flatten(x)
-    x = K.reshape(x, (-1, s[1]*s[2], s[3]))
+    x = K.reshape(x, (-1, s[1] * s[2], s[3]))
     return K.batch_dot(x, K.permute_dimensions(x, (0, 2, 1)))
+
 
 def frobenius_norm(x):
     a, b = x[0], x[1]
@@ -41,11 +36,12 @@ def frobenius_norm(x):
     M = s[1] * s[2] * 3
     return K.sum(K.square(a - b)) / (4 * K.square(M))
 
+
 def min_loss(y_true, y_pred):
     return K.sum(y_pred)
 
 
-class TripletExplicitALICEwithExplicitLCCandDSandStyleLoss(BaseModel, metaclass=ABCMeta):
+class TripletExplicitALICEwithExplicitLCCandDSandStyleLoss(BaseModel):
 
     def __init__(self,
                  submodels=['ealice_shared', 'ealice_shared'],

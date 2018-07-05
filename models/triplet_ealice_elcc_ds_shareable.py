@@ -1,16 +1,9 @@
 import os
-import random
-from abc import ABCMeta, abstractmethod
-
 import numpy as np
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-                          Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.layers import Concatenate
+from keras.optimizers import RMSprop
 from keras import backend as K
 
 from core.models import BaseModel
@@ -18,8 +11,7 @@ import models
 
 from .utils import *
 from .layers import *
-from .alice import generator_lossfun, discriminator_lossfun, simple_generator_lossfun, simple_discriminator_lossfun
-from .triplet_alice_elcc_ds import TripletALICEwithLCCandDS, triplet_lossfun_creator
+from .triplet_alice_elcc_ds import TripletALICEwithLCCandDS
 from .triplet_ealice_elcc_ds import TripletExplicitALICEwithExplicitLCCandDS
 
 

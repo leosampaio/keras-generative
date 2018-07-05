@@ -1,7 +1,7 @@
 import keras
 from keras.engine.topology import Layer
-from keras.layers import Conv2D, UpSampling2D, BatchNormalization, Conv2DTranspose
-from keras.layers import Activation, ELU, LeakyReLU, Dropout, Lambda
+from keras.layers import Conv2D, BatchNormalization, Conv2DTranspose
+from keras.layers import Activation, ELU, LeakyReLU, Dropout
 from keras.layers.merge import _Merge
 from keras import backend as K
 import tensorflow as tf

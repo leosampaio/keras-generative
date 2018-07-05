@@ -1,16 +1,8 @@
-import os
-import random
-from abc import ABCMeta, abstractmethod
-
 import numpy as np
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.layers import Concatenate, Lambda
+from keras.optimizers import RMSprop
 from keras import backend as K
 
 from core.models import BaseModel
@@ -19,6 +11,7 @@ import models
 from .utils import *
 from .layers import *
 from .ali import generator_lossfun, discriminator_lossfun
+
 
 def triplet_lossfun_creator(margin=1., zdims=256):
     def triplet_lossfun(_, y_pred):
@@ -31,7 +24,8 @@ def triplet_lossfun_creator(margin=1., zdims=256):
     return triplet_lossfun
 
 
-class TripletALI(BaseModel, metaclass=ABCMeta):
+class TripletALI(BaseModel):
+
     def __init__(self,
                  submodels=['ali_MNIST', 'ali_SVHN'],
                  *args,
@@ -61,9 +55,8 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
 
         self.build_model()
 
-
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
-        
+
         a_x, p_x, n_x = x_data
         a_y, p_y, n_y = y_batch
 
@@ -72,7 +65,7 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         # perform label smoothing if applicable
         y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=True)
         y = np.stack((y_neg, y_pos), axis=1)
-        y = [y]*3
+        y = [y] * 3
 
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
@@ -86,7 +79,7 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         d_loss = self.dis_trainer.train_on_batch(input_data, y)
         g_loss = self.gen_trainer.train_on_batch(input_data, y)
 
-        gen_loss = g_loss[1] + g_loss[2] 
+        gen_loss = g_loss[1] + g_loss[2]
         dis_loss = d_loss[0]
 
         # # repeat generator training if loss is too high in comparison with D
@@ -104,10 +97,10 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
             'g_loss': gen_loss,
             'd_loss': d_loss[0],
             'd1_g_loss': g_loss[1],
-            'd1_d_loss':d_loss[1],
-            'd2_g_loss':g_loss[2],
-            'd2_d_loss':d_loss[2],
-            'triplet_loss':g_loss[3],
+            'd1_d_loss': d_loss[1],
+            'd2_g_loss': g_loss[2],
+            'd2_d_loss': d_loss[2],
+            'triplet_loss': g_loss[3],
         }
 
         return losses
@@ -167,8 +160,8 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         concatenated_d2 = Concatenate(axis=-1, name="d2_discriminator")([d2_p, d2_q])
         concatenated_triplet_enc = Concatenate(axis=-1, name="triplet_encoding")([d1_z_a_hat, d2_z_p_hat, d2_z_n_hat])
         return Model(
-            input, 
-            [concatenated_d1, concatenated_d2, concatenated_triplet_enc], 
+            input,
+            [concatenated_d1, concatenated_d2, concatenated_triplet_enc],
             name='triplet_ali'
         )
 
@@ -181,38 +174,38 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         # build the discriminators trainer
         self.dis_trainer = self.build_trainer()
         set_trainable(
-            [self.ali_d1.f_Gx, self.ali_d1.f_Gz, 
-            self.ali_d2.f_Gx, self.ali_d2.f_Gz], False)
+            [self.ali_d1.f_Gx, self.ali_d1.f_Gz,
+             self.ali_d2.f_Gx, self.ali_d2.f_Gz], False)
         set_trainable([self.ali_d1.f_D, self.ali_d2.f_D], True)
-        self.dis_trainer.compile(optimizer=opt_d, 
-                                loss={
-                                    "d1_discriminator": loss_d,
-                                    "d2_discriminator": loss_d,
-                                    "triplet_encoding": loss_triplet
-                                },
-                                loss_weights=[1., 1., 0.])
+        self.dis_trainer.compile(optimizer=opt_d,
+                                 loss={
+                                     "d1_discriminator": loss_d,
+                                     "d2_discriminator": loss_d,
+                                     "triplet_encoding": loss_triplet
+                                 },
+                                 loss_weights=[1., 1., 0.])
 
         # build the generators trainer
         self.gen_trainer = self.build_trainer()
         set_trainable(
-            [self.ali_d1.f_Gx, self.ali_d1.f_Gz, 
-            self.ali_d2.f_Gx, self.ali_d2.f_Gz], True)
+            [self.ali_d1.f_Gx, self.ali_d1.f_Gz,
+             self.ali_d2.f_Gx, self.ali_d2.f_Gz], True)
         set_trainable([self.ali_d1.f_D, self.ali_d2.f_D], False)
-        self.gen_trainer.compile(optimizer=opt_d, 
-                                loss={
-                                    "d1_discriminator": loss_g,
-                                    "d2_discriminator": loss_g,
-                                    "triplet_encoding": loss_triplet
-                                },
-                                loss_weights=[1., 1., 1.])
+        self.gen_trainer.compile(optimizer=opt_d,
+                                 loss={
+                                     "d1_discriminator": loss_g,
+                                     "d2_discriminator": loss_g,
+                                     "triplet_encoding": loss_triplet
+                                 },
+                                 loss_weights=[1., 1., 1.])
 
-        self.dis_trainer.summary(); self.gen_trainer.summary()
+        self.dis_trainer.summary()
+        self.gen_trainer.summary()
 
         # Store trainers
         self.store_to_save('dis_trainer')
         self.store_to_save('gen_trainer')
 
-        
     def save_model(self, out_dir, epoch):
         self.trainers['d1_f_D'] = self.d1_f_D
         self.trainers['d1_f_Gz'] = self.d1_f_Gz
@@ -233,7 +226,7 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
         else:
             d1_imgs = self.ali_d1.f_Gx.predict(samples)
             d2_imgs = self.ali_d2.f_Gx.predict(samples)
-        imgs = np.empty((2*len(samples)) + tuple(d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
+        imgs = np.empty((2 * len(samples)) + tuple(d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
         imgs[0::2] = d1_imgs
         imgs[1::2] = d2_imgs
         if imgs.shape[3] == 1:
@@ -259,4 +252,5 @@ class TripletALI(BaseModel, metaclass=ABCMeta):
             return "Domain 1 G and D losses are equal"
         elif losses["d2_g_loss"] == losses["d2_d_loss"]:
             return "Domain 2 G and D losses are equal"
-        else: return False
+        else:
+            return False

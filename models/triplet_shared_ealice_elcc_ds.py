@@ -1,16 +1,7 @@
-import os
-import random
-from abc import ABCMeta, abstractmethod
-
 import numpy as np
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-                          Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.layers import Concatenate
 from keras import backend as K
 
 from core.models import BaseModel
@@ -18,15 +9,17 @@ import models
 
 from .utils import *
 from .layers import *
-from .alice import generator_lossfun, discriminator_lossfun, simple_generator_lossfun, simple_discriminator_lossfun
+from .alice import simple_generator_lossfun, simple_discriminator_lossfun
 from .triplet_alice_lcc_ds import TripletALICEwithLCCandDS, triplet_lossfun_creator
+
 
 def latent_cycle_mae_loss(y_true, y_pred):
 
-    a, b = y_pred[..., :y_pred.shape[-1]//2], y_pred[..., (y_pred.shape[-1]//2):] 
+    a, b = y_pred[..., :y_pred.shape[-1] // 2], y_pred[..., (y_pred.shape[-1] // 2):]
     return K.mean(K.abs(a - b), axis=-1)
 
-class TripletExplicitALICEwithExplicitLCCandDS(BaseModel, metaclass=ABCMeta):
+
+class TripletExplicitALICEwithExplicitLCCandDS(BaseModel):
 
     def __init__(self,
                  submodels=['ealice_shared', 'ealice_shared'],
@@ -118,7 +111,7 @@ class TripletExplicitALICEwithExplicitLCCandDS(BaseModel, metaclass=ABCMeta):
         input_z = Input(shape=(self.z_dims, ))
 
         d1_z_hat = self.alice_d1.f_Gz(input_a_x)
-        d2_z_hat = self.alice_d2.f_Gz(input_p_x)        
+        d2_z_hat = self.alice_d2.f_Gz(input_p_x)
 
         # build ALICE for Domain 1 (anchor)
         d1_x_hat = self.alice_d1.f_Gx(input_z)

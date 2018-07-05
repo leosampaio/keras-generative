@@ -1,16 +1,9 @@
 import os
-import random
-from abc import ABCMeta, abstractmethod
-
 import numpy as np
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-                          Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.layers import Concatenate
+from keras.optimizers import RMSprop
 from keras import backend as K
 
 from core.models import BaseModel
@@ -72,7 +65,7 @@ def triplet_lossfun_creator(margin=1., zdims=256):
     return triplet_lossfun
 
 
-class TripletALICEwithLCCandDS(BaseModel, metaclass=ABCMeta):
+class TripletALICEwithLCCandDS(BaseModel):
 
     def __init__(self,
                  submodels=['alice_ds_mnist', 'alice_ds_svhn'],

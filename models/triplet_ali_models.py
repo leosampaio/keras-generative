@@ -1,13 +1,12 @@
 import keras.backend as K
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
-import numpy as np
+from keras.optimizers import RMSprop
 
 from models.triplet_ali import TripletALI
-from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
+from models.layers import BasicConvLayer, BasicDeconvLayer
 
 
 class SVHN_MNIST_TripletALI(TripletALI):

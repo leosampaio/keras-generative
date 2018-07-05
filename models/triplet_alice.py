@@ -1,16 +1,10 @@
 import os
-import random
-from abc import ABCMeta, abstractmethod
 
 import numpy as np
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.layers import Concatenate
+from keras.optimizers import RMSprop
 from keras import backend as K
 
 from core.models import BaseModel
@@ -19,6 +13,7 @@ import models
 from .utils import *
 from .layers import *
 from .alice import generator_lossfun, discriminator_lossfun
+
 
 def triplet_lossfun_creator(margin=1., zdims=256):
     def triplet_lossfun(_, y_pred):
@@ -31,7 +26,8 @@ def triplet_lossfun_creator(margin=1., zdims=256):
     return triplet_lossfun
 
 
-class TripletALICE(BaseModel, metaclass=ABCMeta):
+class TripletALICE(BaseModel):
+
     def __init__(self,
                  submodels=['alice_mnist', 'alice_svhn'],
                  *args,
@@ -69,9 +65,8 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
 
         self.build_model()
 
-
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
-        
+
         a_x, p_x, n_x = x_data
         a_y, p_y, n_y = y_batch
 
@@ -80,7 +75,7 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
         # perform label smoothing if applicable
         y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=True)
         y = np.stack((y_neg, y_pos), axis=1)
-        y = [y]*3
+        y = [y] * 3
 
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
@@ -94,7 +89,7 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
         d_loss = self.dis_trainer.train_on_batch(input_data, y)
         g_loss = self.gen_trainer.train_on_batch(input_data, y)
 
-        gen_loss = g_loss[1] + g_loss[2] 
+        gen_loss = g_loss[1] + g_loss[2]
         dis_loss = d_loss[0]
 
         self.last_d_loss = dis_loss
@@ -103,10 +98,10 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
             'g_loss': gen_loss,
             'd_loss': d_loss[0],
             'domain1_g_loss': g_loss[1],
-            'domain1_d_loss':d_loss[1],
-            'domain2_g_loss':g_loss[2],
-            'domain2_d_loss':d_loss[2],
-            'triplet_loss':g_loss[3],
+            'domain1_d_loss': d_loss[1],
+            'domain2_g_loss': g_loss[2],
+            'domain2_d_loss': d_loss[2],
+            'triplet_loss': g_loss[3],
         }
 
         return losses
@@ -175,8 +170,8 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
         concatenated_d2 = Concatenate(axis=-1, name="d2_discriminator")([d2_p, d2_q, d2_p_cycle, d2_q_cycle])
         concatenated_triplet_enc = Concatenate(axis=-1, name="triplet_encoding")([d1_z_a_hat, d2_z_p_hat, d2_z_n_hat])
         return Model(
-            input, 
-            [concatenated_d1, concatenated_d2, concatenated_triplet_enc], 
+            input,
+            [concatenated_d1, concatenated_d2, concatenated_triplet_enc],
             name='triplet_ali'
         )
 
@@ -189,34 +184,35 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
         # build the discriminators trainer
         self.dis_trainer = self.build_trainer()
         set_trainable(
-            [self.alice_d1.f_Gx, self.alice_d1.f_Gz, 
-            self.alice_d2.f_Gx, self.alice_d2.f_Gz], False)
+            [self.alice_d1.f_Gx, self.alice_d1.f_Gz,
+             self.alice_d2.f_Gx, self.alice_d2.f_Gz], False)
         set_trainable([self.alice_d1.f_D, self.alice_d2.f_D,
-            self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle], True)
-        self.dis_trainer.compile(optimizer=opt_d, 
-                                loss={
-                                    "d1_discriminator": loss_d,
-                                    "d2_discriminator": loss_d,
-                                    "triplet_encoding": loss_triplet
-                                },
-                                loss_weights=[1., 1., 0.])
+                       self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle], True)
+        self.dis_trainer.compile(optimizer=opt_d,
+                                 loss={
+                                     "d1_discriminator": loss_d,
+                                     "d2_discriminator": loss_d,
+                                     "triplet_encoding": loss_triplet
+                                 },
+                                 loss_weights=[1., 1., 0.])
 
         # build the generators trainer
         self.gen_trainer = self.build_trainer()
         set_trainable(
-            [self.alice_d1.f_Gx, self.alice_d1.f_Gz, 
-            self.alice_d2.f_Gx, self.alice_d2.f_Gz], True)
+            [self.alice_d1.f_Gx, self.alice_d1.f_Gz,
+             self.alice_d2.f_Gx, self.alice_d2.f_Gz], True)
         set_trainable([self.alice_d1.f_D, self.alice_d2.f_D,
-            self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle], False)
-        self.gen_trainer.compile(optimizer=opt_g, 
-                                loss={
-                                    "d1_discriminator": loss_g,
-                                    "d2_discriminator": loss_g,
-                                    "triplet_encoding": loss_triplet
-                                },
-                                loss_weights=[1., 1., self.triplet_weight])
+                       self.alice_d1.f_D_cycle, self.alice_d2.f_D_cycle], False)
+        self.gen_trainer.compile(optimizer=opt_g,
+                                 loss={
+                                     "d1_discriminator": loss_g,
+                                     "d2_discriminator": loss_g,
+                                     "triplet_encoding": loss_triplet
+                                 },
+                                 loss_weights=[1., 1., self.triplet_weight])
 
-        self.dis_trainer.summary(); self.gen_trainer.summary()
+        self.dis_trainer.summary()
+        self.gen_trainer.summary()
 
         # Store trainers
         self.store_to_save('dis_trainer')
@@ -230,7 +226,6 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
         self.store_to_save('d2_f_Gz')
         self.store_to_save('d2_f_Gx')
 
-        
     def save_model(self, out_dir, epoch):
         super().save_model(out_dir, epoch)
 
@@ -244,7 +239,7 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
         else:
             d1_imgs = self.alice_d1.f_Gx.predict(samples)
             d2_imgs = self.alice_d2.f_Gx.predict(samples)
-        imgs = np.empty((2*len(samples)) + tuple(d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
+        imgs = np.empty((2 * len(samples)) + tuple(d1_imgs.shape[1:]), dtype=d1_imgs.dtype)
         imgs[0::2] = d1_imgs
         imgs[1::2] = d2_imgs
         if imgs.shape[3] == 1:
@@ -270,7 +265,8 @@ class TripletALICE(BaseModel, metaclass=ABCMeta):
             return "Domain 1 G and D losses are equal"
         elif losses["domain2_g_loss"] == losses["domain2_d_loss"]:
             return "Domain 2 G and D losses are equal"
-        else: return False
+        else:
+            return False
 
     def plot_losses_hist(self, out_dir):
         plt.plot(self.g_losses, label='Gen')

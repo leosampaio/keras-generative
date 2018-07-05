@@ -1,36 +1,19 @@
-import os
-import random
-from abc import ABCMeta, abstractmethod
 from pprint import pprint
 
 import numpy as np
-from sklearn.svm import LinearSVC
-from sklearn.model_selection import GridSearchCV, StratifiedShuffleSplit
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.manifold import TSNE
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
                           BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           LocallyConnected2D, Add,
                           Lambda, AveragePooling1D, GlobalAveragePooling2D)
-from keras.optimizers import Adam, Adadelta, RMSprop
-from keras import regularizers
-from keras import initializers
+from keras.optimizers import Adam, RMSprop
 from keras import backend as K
-from keras.applications.mobilenet import MobileNet
 
 from core.models import BaseModel
 
 from .utils import *
 from .layers import *
-from . import mmd
-from . import inception_score
-from . import server
 
 
 def triplet_lossfun_creator(margin=1., zdims=256, inverted=False):
@@ -82,7 +65,7 @@ def generator_lossfun(y_true, y_pred):
     return q_error + p_error
 
 
-class TOPGANwithAEfromEBGAN(BaseModel, metaclass=ABCMeta):
+class TOPGANwithAEfromEBGAN(BaseModel):
     name = 'topgan_ae_ebgan'
     loss_names = ['g_loss', 'd_loss', 'd_triplet',
                   'g_triplet', 'ae_loss']

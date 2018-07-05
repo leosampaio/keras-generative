@@ -1,20 +1,21 @@
 import keras.backend as K
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape, 
-    BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-    Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
-import numpy as np
+from keras.layers import (Flatten, Dense, Activation, Reshape,
+                          BatchNormalization, Concatenate, Dropout,
+                          LeakyReLU, LocallyConnected2D,
+                          Lambda)
+from keras.optimizers import RMSprop
 
 from models.ali import ALI
-from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
-from models.utils import set_trainable, zero_loss
+from models.layers import BasicConvLayer, BasicDeconvLayer
+
 
 class ALIforSVHN(ALI):
     """
     Based on the original ALI paper arch. Experiment on SVHN.
     See Table 4 on the paper for details
     """
+
     def __init__(self, *args, **kwargs):
         kwargs['name'] = 'ali_for_svhn'
         super().__init__(*args, **kwargs)
@@ -31,7 +32,7 @@ class ALIforSVHN(ALI):
 
         x = Flatten()(x)
 
-        # the output is an average (mu) and std variation (sigma) 
+        # the output is an average (mu) and std variation (sigma)
         # describing the distribution that better describes the input
         mu = Dense(self.z_dims)(x)
         mu = Activation('linear')(mu)
@@ -41,7 +42,7 @@ class ALIforSVHN(ALI):
         # use the generated values to sample random z from the latent space
         concatenated = Concatenate(axis=-1)([mu, sigma])
         output = Lambda(
-            function=lambda x: x[:,:self.z_dims] + (K.exp(x[:,self.z_dims:]) * (K.random_normal(shape=K.shape(x[:,self.z_dims:])))),
+            function=lambda x: x[:, :self.z_dims] + (K.exp(x[:, self.z_dims:]) * (K.random_normal(shape=K.shape(x[:, self.z_dims:])))),
             output_shape=(self.z_dims, )
         )(concatenated)
 
@@ -63,7 +64,6 @@ class ALIforSVHN(ALI):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model(z_input, x)
-
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)
@@ -101,14 +101,15 @@ class ALIforSVHN(ALI):
         opt_g = RMSprop(lr=1e-4)
         return opt_d, opt_g
 
+
 class ConditionalALIforSVHN(ALIforSVHN):
     """
     Conditional version of AliforSVHN
     """
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.name = "{}_r{}".format('ali_for_svhn_conditional', self.run_id)
-
 
     def build_Gx(self):
         z_input = Input(shape=(self.z_dims,))
@@ -128,7 +129,6 @@ class ConditionalALIforSVHN(ALIforSVHN):
         x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
 
         return Model([z_input, conditional_input], x)
-
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)

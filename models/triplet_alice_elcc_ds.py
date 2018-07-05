@@ -1,16 +1,8 @@
-import os
-import random
-from abc import ABCMeta, abstractmethod
-
 import numpy as np
 
-import keras
-from keras.engine.topology import Layer
 from keras import Input, Model
-from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
-                          Lambda)
-from keras.optimizers import Adam, SGD, RMSprop
+from keras.layers import Concatenate
+from keras.optimizers import Adam
 from keras import backend as K
 
 from core.models import BaseModel
@@ -26,7 +18,7 @@ def latent_cycle_mae_loss(y_true, y_pred):
     a, b = y_pred[..., :y_pred.shape[-1]//2], y_pred[..., (y_pred.shape[-1]//2):] 
     return K.mean(K.abs(a - b), axis=-1)
 
-class TripletALICEwithExplicitLCCandDS(BaseModel, metaclass=ABCMeta):
+class TripletALICEwithExplicitLCCandDS(BaseModel):
 
     def __init__(self,
                  submodels=['alice_ds_mnist', 'alice_ds_svhn'],

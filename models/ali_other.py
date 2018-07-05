@@ -1,12 +1,10 @@
 from keras import Input, Model
 from keras.applications import MobileNet
-from keras.layers import Flatten, Dense, Activation, Reshape, BatchNormalization, Concatenate, Dropout, LeakyReLU, \
+from keras.layers import Flatten, Dense, Activation, Reshape, Concatenate, Dropout, LeakyReLU, \
     LocallyConnected2D
-from keras.optimizers import Adam
 
 from models.ali import ALI
-from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal
-from models.utils import set_trainable, zero_loss
+from models.layers import BasicConvLayer
 
 
 class WiderALI(ALI):

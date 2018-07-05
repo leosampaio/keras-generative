@@ -9,7 +9,7 @@ import keras
 from keras.engine.topology import Layer
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU, LocallyConnected2D,
+                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           Lambda, AveragePooling1D, GlobalAveragePooling2D)
 from keras.optimizers import Adam, Adadelta
 from keras import initializers

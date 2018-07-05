@@ -1,10 +1,9 @@
 import keras.backend as K
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
+                          Concatenate, Dropout, LeakyReLU,
                           Lambda)
 from keras.optimizers import Adam, RMSprop
-import numpy as np
 
 from models.alice import ALICE, ExplicitALICE
 from models.layers import BasicConvLayer, BasicDeconvLayer
@@ -290,6 +289,7 @@ class ALICEforSharedExp(ALICE):
         opt_g = Adam(lr=self.lr, clipnorm=5.)
         return opt_d, opt_g
 
+
 class ExplicitALICEforSharedExp(ExplicitALICE):
 
     def __init__(self, *args, **kwargs):
@@ -357,8 +357,10 @@ class ExplicitALICEforSharedExp(ExplicitALICE):
         z_input = Input(shape=(self.z_dims,))
         orig_channels = self.input_shape[2]
 
-        x = Dense(512)(z_input); x = LeakyReLU(0.1)(x)
-        x = Dense(512)(x); x = LeakyReLU(0.1)(x)
+        x = Dense(512)(z_input)
+        x = LeakyReLU(0.1)(x)
+        x = Dense(512)(x)
+        x = LeakyReLU(0.1)(x)
 
         x = Reshape((4, 4, 32))(x)
 
