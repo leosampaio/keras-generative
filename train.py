@@ -44,6 +44,7 @@ def main():
                         help="strings in format loss_name:weight:control_type:pivot_epoch")
     parser.add_argument('--metrics', type=str, nargs='+',
                         help="selection of metrics you want to calculate")
+    parser.add_argument('--wgan-n-critic', default=5, type=int)
 
     args = parser.parse_args()
 

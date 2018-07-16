@@ -11,58 +11,11 @@ from keras.optimizers import Adam, RMSprop
 from keras import backend as K
 
 from core.models import BaseModel
+from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
+                           generator_lossfun)
 
 from .utils import *
 from .layers import *
-
-
-def triplet_lossfun_creator(margin=1., zdims=256, inverted=False):
-    def triplet_lossfun(_, y_pred):
-
-        m = K.constant(margin)
-        zero = K.constant(0.)
-        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
-        if inverted:
-            return K.maximum(zero, m + K.sqrt(K.sum(K.square(a - n))))
-        else:
-            return K.maximum(zero, m + K.sqrt(K.sum(K.square(a - p))) - K.sqrt(K.sum(K.square(a - n))))
-
-    return triplet_lossfun
-
-
-def discriminator_lossfun(y_true, y_pred):
-    """
-    y_pred[:,0]: p, prediction for pairs (Gx(z), z)
-    y_pred[:,1]: q, prediction for pairs (x, Gz(z))
-    y_pred[:,2]: p_cycle, prediction for pairs (x, x)
-    y_pred[:,3]: q_cycle, prediction for pairs (x, Gx(x))
-    """
-    p = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
-    q = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:, 0]
-    q_true = y_true[:, 1]
-
-    q_error = -K.mean(K.log(K.abs(q_true - q)))
-    p_error = -K.mean(K.log(K.abs(p - p_true)))
-
-    return q_error + p_error
-
-
-def generator_lossfun(y_true, y_pred):
-    """
-    y_pred[:,0]: p, prediction for pairs (Gx(z), z)
-    y_pred[:,1]: q, prediction for pairs (x, Gz(z))
-
-    """
-    p = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
-    q = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:, 0]
-    q_true = y_true[:, 1]
-
-    q_error = -K.mean(K.log(K.abs(p_true - q)))
-    p_error = -K.mean(K.log(K.abs(p - q_true)))
-
-    return q_error + p_error
 
 
 class TOPGANwithAEfromEBGAN(BaseModel):

@@ -7,7 +7,7 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
 from keras.optimizers import Adam
 
 from models.alice import ExplicitALICE
-from models.layers import BasicConvLayer, BasicDeconvLayer, SampleNormal, ResLayer, ResDeconvLayer
+from models.layers import BasicConvLayer, BasicDeconvLayer, ResLayer, ResDeconvLayer
 from models.ali_mnist import ALIforSharedExp
 
 

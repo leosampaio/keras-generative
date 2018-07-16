@@ -8,23 +8,17 @@ import tensorflow as tf
 from . import mmd
 
 
-class SampleNormal(Layer):
-    __name__ = 'sample_normal'
+class RandomWeightedAverage(_Merge):
+    """Takes a randomly-weighted average of two tensors. In geometric terms, this outputs a random point on the line
+    between each pair of input points.
+    Inheriting from _Merge is a little messy but it was the quickest solution I could think of.
+    Improvements appreciated."""
 
-    def __init__(self, **kwargs):
-        self.is_placeholder = True
-        super(SampleNormal, self).__init__(**kwargs)
-
-    def _sample_normal(self, z_avg, z_log_var):
-        batch_size = K.shape(z_avg)[0]
-        z_dims = K.shape(z_avg)[1]
-        eps = K.random_normal(shape=K.shape(z_avg), mean=0.0, stddev=1.0)
-        return z_avg + K.exp(z_log_var / 2.0) * eps
-
-    def call(self, inputs):
-        z_avg = inputs[0]
-        z_log_var = inputs[1]
-        return self._sample_normal(z_avg, z_log_var)
+    def _merge_function(self, inputs):
+        weights = K.random_uniform((K.shape(inputs[0])[0], 1, 1, 1))
+        weighted_a = weights * inputs[0]
+        weighted_b = (1 - weights) * inputs[1]
+        return weighted_a + weighted_b
 
 
 class MinibatchDiscrimination(Layer):
@@ -65,7 +59,7 @@ def BasicConvLayer(filters,
                    dropout=0.0,
                    activation='leaky_relu',
                    leaky_relu_slope=0.1,
-                   residual=None):
+                   residual=None, k_constraint=None):
 
     kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
     bias_init = keras.initializers.Zeros()
@@ -74,7 +68,8 @@ def BasicConvLayer(filters,
                   strides=strides,
                   kernel_initializer=kernel_init,
                   bias_initializer=bias_init,
-                  padding=padding)
+                  padding=padding,
+                  kernel_constraint=k_constraint)
     bn = BatchNormalization()
 
     def fun(inputs):
@@ -159,7 +154,8 @@ def ResLayer(filters,
 
     kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
     bias_init = keras.initializers.Zeros()
-    conv = BasicConvLayer(filters, kernel_size=kernel_size,  padding=padding,  strides=strides,  bnorm=bnorm,  dropout=dropout,  activation=activation,  leaky_relu_slope=leaky_relu_slope,  residual=residual)
+    conv = BasicConvLayer(filters, kernel_size=kernel_size,  padding=padding,  strides=strides,  bnorm=bnorm,
+                          dropout=dropout,  activation=activation,  leaky_relu_slope=leaky_relu_slope,  residual=residual)
     resconv = Conv2D(filters=filters,
                      kernel_size=kernel_size,
                      strides=strides,
@@ -199,7 +195,8 @@ def ResDeconvLayer(filters,
 
     kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
     bias_init = keras.initializers.Zeros()
-    conv = BasicDeconvLayer(filters, kernel_size=kernel_size, padding=padding, strides=strides, bnorm=bnorm, dropout=dropout, activation=activation, leaky_relu_slope=leaky_relu_slope, residual=residual)
+    conv = BasicDeconvLayer(filters, kernel_size=kernel_size, padding=padding, strides=strides, bnorm=bnorm,
+                            dropout=dropout, activation=activation, leaky_relu_slope=leaky_relu_slope, residual=residual)
     resconv = Conv2DTranspose(filters=filters,
                               kernel_size=kernel_size,
                               strides=strides,
@@ -262,7 +259,7 @@ class GramMatrixLayer(Layer):
         return gram
 
     def compute_output_shape(self, input_shape):
-        flattened_shape = input_shape[1]*input_shape[2]*input_shape[3]
+        flattened_shape = input_shape[1] * input_shape[2] * input_shape[3]
         return (input_shape[0], flattened_shape, flattened_shape)
 
 
@@ -353,6 +350,7 @@ class PermutationMatrixPiLayer(Layer):
 
 
 class GradNorm(Layer):
+
     def __init__(self, **kwargs):
         super(GradNorm, self).__init__(**kwargs)
 
@@ -369,11 +367,6 @@ class GradNorm(Layer):
     def compute_output_shape(self, input_shapes):
         return (input_shapes[1][0], 1)
 
-class RandomWeightedAverage(_Merge):
-    """Provides a (random) weighted average between real and generated image samples"""
-    def _merge_function(self, inputs):
-        weights = K.random_uniform((32, 1, 1, 1))
-        return (weights * inputs[0]) + ((1 - weights) * inputs[1])
 
 class MaximumMeanDiscrepancy(Layer):
     __name__ = 'maximum_mean_discrepancy_layer'

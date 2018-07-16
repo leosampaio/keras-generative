@@ -67,6 +67,8 @@ class BaseModel(metaclass=ABCMeta):
 
         # generic loss setup - start
         controlled_losses = kwargs.get('controlled_losses', [])
+        if controlled_losses is None:
+            controlled_losses = []
         self.losses = {}
         for loss_name in self.loss_names:
 
