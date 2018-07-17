@@ -8,96 +8,105 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
                           BatchNormalization, Concatenate, Dropout, LeakyReLU,
                           LocallyConnected2D, Add,
                           Lambda, AveragePooling1D, GlobalAveragePooling2D)
-from keras.optimizers import Adam, RMSprop
-from keras.constraints import Constraint
+from keras.optimizers import Adam
 from keras import backend as K
 
 from core.models import BaseModel
-from core.lossfuns import wasserstein_dis_lossfun, wasserstein_gen_lossfun
+from core.lossfuns import (began_gen_lossfun, began_dis_lossfun,
+                           began_convergence_lossfun)
 
 from .utils import *
 from .layers import *
 
 
-class WeightClip(Constraint):
-    '''Clips the weights incident to each hidden unit to be inside a range
-    '''
-
-    def __init__(self, c=2):
-        self.c = c
-
-    def __call__(self, p):
-        return K.clip(p, -self.c, self.c)
-
-    def get_config(self):
-        return {'name': 'weight-clip',
-                'c': self.c}
-
-
-class WGAN(BaseModel):
-    name = 'wgan'
-    loss_names = ['g_loss', 'd_loss']
-    loss_plot_organization = [('g_loss', 'd_loss')]
+class BEGAN(BaseModel):
+    name = 'began'
+    loss_names = ['g_loss', 'd_loss', 'gd_ratio', 'convergence_measure']
+    loss_plot_organization = [('g_loss', 'd_loss', 'gd_ratio'), 'convergence_measure']
 
     def __init__(self,
                  input_shape=(64, 64, 3),
-                 triplet_margin=1.,
-                 wgan_n_critic=5,
+                 embedding_dim=256,
+                 began_gamma=0.5,
                  **kwargs):
         super().__init__(input_shape=input_shape, **kwargs)
 
-        self.n_critic = wgan_n_critic
+        self.embedding_size = embedding_dim
+        self.gamma = began_gamma
 
         pprint(vars(self))
+
         self.build_model()
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
 
         batchsize = len(x_data)
-        y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=False)
-        y = np.stack((y_neg, y_pos), axis=1)
 
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
 
         input_data = [x_data, z_latent_dis]
-        label_data = [y]
+        label_data = [x_data, x_data, x_data]
 
-        ld = {}
-        for _ in range(self.n_critic):
-            ld['d_loss'] = self.dis_trainer.train_on_batch(input_data, label_data)
-        ld['g_loss'] = self.gen_trainer.train_on_batch(input_data, label_data)
+        # train both networks
+        ld = {}  # loss dictionary
+        _, ld['d_loss'], _, _ = self.dis_trainer.train_on_batch(input_data, label_data)
+        _, ld['g_loss'], ld['ae_loss'], ld['convergence_measure'] = self.gen_trainer.train_on_batch(input_data, label_data)
+
+        # update k
+        ld['gd_ratio'] = K.get_value(self.k_gd_ratio) + self.lr * (self.gamma * ld['ae_loss'] - ld['g_loss'])
+        K.set_value(self.k_gd_ratio, ld['gd_ratio'])
+        ld['gd_ratio'] *= batchsize  # fix plotted value because losses are divided
 
         return ld
 
     def build_trainer(self):
-        input_z = Input(shape=(self.z_dims,))
         input_x = Input(shape=self.input_shape)
-        p = self.f_D(self.f_Gx(input_z))
-        q = self.f_D(input_x)
-        concatenated_dis = Concatenate(axis=-1, name="dis_classification")([p, q])
-        return Model([input_x, input_z], concatenated_dis, name='wgan')
+        input_z = Input(shape=(self.z_dims,))
+
+        x_hat = self.f_Gx(input_z)
+
+        x_hat_reconstructed = self.f_D(x_hat)
+        x_reconstructed = self.f_D(input_x)
+
+        input = [input_x, input_z]
+
+        concatenated_dis = Concatenate(axis=-1, name="ae")([x_hat, x_hat_reconstructed, x_reconstructed])
+        output = [concatenated_dis, x_hat, concatenated_dis]
+        return Model(input, output, name='began')
 
     def build_model(self):
 
-        self.f_Gx = self.build_Gx()
-        self.f_D = self.build_D()
+        self.f_Gx = self.build_Gx()  # Moriarty, the encoder
+        self.f_D = self.build_D()   # Sherlock, the detective
+        self.f_Gx.summary()
+        self.f_D.summary()
+        self.encoder.summary()
+        self.decoder.summary()
 
         self.optimizers = self.build_optmizers()
+        self.k_gd_ratio = K.variable(0)  # initialize k
+        dis_lossfun = partial(began_dis_lossfun, k_gd_ratio=self.k_gd_ratio)
+        dis_lossfun.__name__ = 'began_dis_loss'
+
+        convergence_lossfun = partial(began_convergence_lossfun, gamma=self.gamma)
+        convergence_lossfun.__name__ = 'convergence_lossfun'
 
         # build discriminator
         self.dis_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
-                                 loss=wasserstein_dis_lossfun)
+                                 loss=[dis_lossfun, 'mae', convergence_lossfun],
+                                 loss_weights=[1., 0., 0.])
 
-        # build generators
+        # build generator
         self.gen_trainer = self.build_trainer()
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
-                                 loss=wasserstein_gen_lossfun)
+                                 loss=[began_gen_lossfun, 'mae', convergence_lossfun],
+                                 loss_weights=[1., 0., 0.])
 
         # store trainers
         self.store_to_save('gen_trainer')
@@ -112,45 +121,40 @@ class WGAN(BaseModel):
         self.trainers['f_D'] = self.f_D
         super().save_model(out_dir, epoch)
 
-    def build_encoder(self):
-        inputs = Input(shape=self.input_shape)
-
-        x = BasicConvLayer(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', k_constraint=WeightClip(0.01))(inputs)
-        x = Flatten()(x)
-        x = Dense(128, kernel_constraint=WeightClip(0.01))(x)
-        x = Activation('linear')(x)
-
-        return Model(inputs, x)
-
     def build_D(self):
-        """
-        Network Architecture based on the one presented in infoGAN
-        """
         x_input = Input(shape=self.input_shape)
 
         self.encoder = self.build_encoder()
         x_embedding = self.encoder(x_input)
 
-        self.d_classifier = self.build_d_classifier()
-        discriminator_clas = self.d_classifier(x_embedding)
+        self.decoder = self.build_decoder()
+        x_hat = self.decoder(x_embedding)
 
-        return Model(x_input, discriminator_clas)
+        return Model(x_input, x_hat)
 
-    def build_d_classifier(self):
-        embedding_input = Input(shape=(128,))
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
 
-        x = Activation('relu')(embedding_input)
-        x = BatchNormalization()(x)
-        x = Dense(64, kernel_constraint=WeightClip(0.01))(x)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
-        x = Dense(64, kernel_constraint=WeightClip(0.01))(x)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
-        x = Dense(1, kernel_constraint=WeightClip(0.01))(x)
+        x = BasicConvLayer(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+        x = Flatten()(x)
+        x = Dense(self.embedding_size)(x)
         x = Activation('linear')(x)
 
-        return Model(embedding_input, x)
+        return Model(inputs, x)
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**1  # starting width
+        x = Dense(64 * w * w)(z_input)
+        x = BatchNormalization()(x)
+        x = Activation('relu')(x)
+        x = Reshape((w, w, 64))(x)
+
+        x = BasicDeconvLayer(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
 
     def build_Gx(self):
         z_input = Input(shape=(self.z_dims,))
@@ -202,3 +206,14 @@ class WGAN(BaseModel):
 
         generated_images = self.f_Gx.predict(samples, batch_size=n)
         return generated_images
+
+    def compute_reconstruction_samples(self, n=18):
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.dataset))
+        imgs_from_dataset = self.dataset.images[perm[:n]]
+        noise = np.random.normal(scale=self.input_noise, size=imgs_from_dataset.shape)
+        imgs_from_dataset += noise
+        np.random.seed()
+        encoding = self.encoder.predict(imgs_from_dataset)
+        x_hat = self.decoder.predict(encoding)
+        return imgs_from_dataset, x_hat

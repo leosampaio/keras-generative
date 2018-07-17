@@ -101,3 +101,48 @@ def wgan_gradient_penalty_lossfun(y_true, y_pred, averaged_samples, gradient_pen
     gradient_penalty = gradient_penalty_weight * K.square(1 - gradient_l2_norm)
     # return the mean as loss over all the batch samples
     return K.mean(gradient_penalty)
+
+
+def began_gen_lossfun(y_true, y_pred):
+    """
+    y_pred[:,0]: (Gx(z))
+    y_pred[:,1]: D(Gx(z))
+    y_pred[:,2]: D(x)
+    y_true:      x
+    """
+    x_hat = y_pred[:, :, :, 0]
+    x_hat_reconstructed = y_pred[:, :, :, 1]
+    ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+    return ae_loss
+
+
+def began_dis_lossfun(y_true, y_pred, k_gd_ratio):
+    """
+    y_pred[:,0]: (Gx(z))
+    y_pred[:,1]: D(Gx(z))
+    y_pred[:,2]: D(x)
+    y_true:      x
+    """
+    x_hat = y_pred[:, :, :, 0]
+    x_hat_reconstructed = y_pred[:, :, :, 1]
+    x_real = y_true[:, :, :, 0]
+    x_real_reconstructed = y_pred[:, :, :, 2]
+    fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+    real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
+    return real_ae_loss - k_gd_ratio * fake_ae_loss
+
+
+def began_convergence_lossfun(y_true, y_pred, gamma):
+    """
+    y_pred[:,0]: (Gx(z))
+    y_pred[:,1]: D(Gx(z))
+    y_pred[:,2]: D(x)
+    y_true:      x
+    """
+    x_hat = y_pred[:, :, :, 0]
+    x_hat_reconstructed = y_pred[:, :, :, 1]
+    x_real = y_true[:, :, :, 0]
+    x_real_reconstructed = y_pred[:, :, :, 2]
+    fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+    real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
+    return real_ae_loss + K.abs(gamma * real_ae_loss - fake_ae_loss)

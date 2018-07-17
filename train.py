@@ -45,6 +45,7 @@ def main():
     parser.add_argument('--metrics', type=str, nargs='+',
                         help="selection of metrics you want to calculate")
     parser.add_argument('--wgan-n-critic', default=5, type=int)
+    parser.add_argument('--began-gamma', default=0.5, type=float)
 
     args = parser.parse_args()
 

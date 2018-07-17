@@ -19,7 +19,7 @@ from .utils import *
 from .layers import *
 
 
-class WGAN(BaseModel):
+class ImprovedWGAN(BaseModel):
     name = 'improved-wgan'
     loss_names = ['g_loss', 'd_loss', 'gp_loss']
     loss_plot_organization = [('g_loss', 'd_loss', 'gp_loss')]
