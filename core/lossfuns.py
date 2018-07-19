@@ -146,3 +146,18 @@ def began_convergence_lossfun(y_true, y_pred, gamma):
     fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
     real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
     return real_ae_loss + K.abs(gamma * real_ae_loss - fake_ae_loss)
+
+
+def ganomaly_latent_ae_lossfun(y_true, y_pred):
+    """
+    y_pred[:,0]: Gz(x)
+    y_pred[:,1]: Dec(Enc(Gz(x)))
+    """
+    z = y_pred[:, 0]
+    z_hat = y_pred[:, 1]
+    return K.mean(K.abs(z - z_hat))
+
+
+def feat_matching_lossfun(_, y_pred):
+    a, n = y_pred[:, 0], y_pred[:, 1]
+    return K.sqrt(K.sum(K.square(a - n)))

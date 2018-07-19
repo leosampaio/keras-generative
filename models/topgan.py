@@ -244,10 +244,8 @@ class TOPGANwithAEfromEBGAN(BaseModel):
     """
 
     def compute_labelled_embedding(self, n=10000):
-        np.random.seed(14)
-        perm = np.random.permutation(len(self.dataset))
-        x_data, y_labels = self.dataset.images[perm[:10000]], np.argmax(self.dataset.attrs[perm[:10000]], axis=1)
-        np.random.seed()
+
+        x_data, y_labels = self.dataset.get_random_fixed_batch(n)
         x_feats = self.encoder.predict(x_data, batch_size=2000)
         self.save_precomputed_features('labelled_embedding', x_feats, Y=y_labels)
         return x_feats, y_labels
@@ -255,11 +253,10 @@ class TOPGANwithAEfromEBGAN(BaseModel):
     def compute_generated_and_real_samples(self, n=10000):
         np.random.seed(14)
         samples = np.random.normal(size=(n, self.z_dims))
-        perm = np.random.permutation(len(self.dataset))
         np.random.seed()
 
         generated_images = self.f_Gx.predict(samples, batch_size=2000)
-        images_from_set = self.dataset.images[perm[:n]]
+        images_from_set, _ = self.dataset.get_random_fixed_batch(n)
 
         self.save_precomputed_features('generated_and_real_samples', generated_images, Y=images_from_set)
         return images_from_set, generated_images
@@ -273,12 +270,11 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         return generated_images
 
     def compute_reconstruction_samples(self, n=18):
+        imgs_from_dataset, _ = self.dataset.get_random_fixed_batch(n)
         np.random.seed(14)
-        perm = np.random.permutation(len(self.dataset))
-        imgs_from_dataset = self.dataset.images[perm[:n]]
         noise = np.random.normal(scale=self.input_noise, size=imgs_from_dataset.shape)
-        imgs_from_dataset += noise
         np.random.seed()
+        imgs_from_dataset += noise
         encoding = self.encoder.predict(imgs_from_dataset)
         x_hat = self.decoder.predict(encoding)
         return imgs_from_dataset, x_hat

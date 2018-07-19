@@ -6,21 +6,14 @@ import queue
 import numpy as np
 import h5py
 
-import matplotlib
-
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
-
-from keras.models import load_model
 from abc import ABCMeta, abstractmethod
 
-from models.utils import *
+from models.utils import print_current_progress, plot_metrics
 from core.losses import Loss
 import metrics
 
 try:
-    from core.notifyier import *
+    from core.notifyier import notify_with_message, notify_with_image
 except ImportError as e:
     print(repr(e))
     print("You did not set a notifyier. Notifications will not be sent anywhere")
@@ -110,6 +103,7 @@ class BaseModel(metaclass=ABCMeta):
 
         # Create output directories if not exist
         self.dataset = dataset
+        self.batchsize = batchsize
         out_dir = os.path.join(self.output, self.experiment_id)
         if not os.path.isdir(out_dir):
             os.mkdir(out_dir)
@@ -128,28 +122,20 @@ class BaseModel(metaclass=ABCMeta):
 
         # Start training
         print('\n\n--- START TRAINING ---\n')
-        num_data = len(dataset)
-        self.batchsize = batchsize
         for e in range(self.last_epoch, epochs):
-            perm = np.random.permutation(num_data)
             start_time = time.time()
             self.current_epoch = e + 1
-            for b in range(0, num_data, batchsize):
-
-                # account for division of data into batch size
-                if batchsize > num_data - b:
-                    continue
-                bsize = batchsize
-                indx = perm[b:b + bsize]
-
-                # slice batch out of dataset
-                x_batch, y_batch = self.make_batch(dataset, indx)
+            for x_batch, y_batch, batch_index in dataset.generator(batchsize=self.batchsize):
 
                 # finally, train and report status
                 losses = self.train_on_batch(x_batch, y_batch=y_batch)
                 self.update_loss_history(losses)
 
-                print_current_progress(e, b, bsize, len(dataset), self.losses, elapsed_time=time.time() - start_time)
+                print_current_progress(e, batch_index,
+                                       batch_size=self.batchsize,
+                                       dataset_length=len(self.dataset),
+                                       losses=self.losses,
+                                       elapsed_time=time.time() - start_time)
 
                 # check for collapse scenario where G and D losses are equal
                 did_collapse = self.did_collapse(losses)
@@ -203,15 +189,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def update_loss_history(self, new_losses):
         for l, loss in self.losses.items():
-            loss.update_history(new_losses[l]/self.batchsize)
-
-    def make_batch(self, dataset, indx):
-        '''
-        Get batch from dataset
-        '''
-        data = dataset.images[indx]
-        labels = dataset.attrs[indx]
-        return data, labels
+            loss.update_history(new_losses[l] / self.batchsize)
 
     def did_collapse(self, losses):
         return False
@@ -253,13 +231,6 @@ class BaseModel(metaclass=ABCMeta):
         Plase override "train_on_batch" method in the derived model!
         '''
         pass
-
-    def predict_images(self, z_sample):
-        images = self.predict(z_sample)
-        if images.shape[3] == 1:
-            images = np.squeeze(imgs, axis=(3,))
-        # images = np.clip(predictions * 0.5 + 0.5, 0.0, 1.0)
-        return images
 
     def gather_data_for_metric(self, data_type):
         data = self.load_precomputed_features_if_they_exist(data_type)

@@ -211,8 +211,6 @@ class BEGAN(BaseModel):
         np.random.seed(14)
         perm = np.random.permutation(len(self.dataset))
         imgs_from_dataset = self.dataset.images[perm[:n]]
-        noise = np.random.normal(scale=self.input_noise, size=imgs_from_dataset.shape)
-        imgs_from_dataset += noise
         np.random.seed()
         encoding = self.encoder.predict(imgs_from_dataset)
         x_hat = self.decoder.predict(encoding)

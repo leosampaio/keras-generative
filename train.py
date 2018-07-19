@@ -1,19 +1,11 @@
 import os
-import sys
-import math
 import argparse
 
 from keras import backend as K
-import numpy as np
-from sklearn.preprocessing import LabelBinarizer
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-import matplotlib
-matplotlib.use('Agg')
-
 import models
 from datasets import load_dataset
+
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 
 def main():
