@@ -9,6 +9,10 @@ from datasets import svhn
 from datasets import mnist
 from datasets import moving_mnist
 from datasets import lsun
+from datasets import cifar10
+from datasets import celeba
+
+import sklearn as sk
 
 
 class Dataset(object):
@@ -33,6 +37,24 @@ class Dataset(object):
         np.random.seed()
         return x_data, y_data
 
+    def get_test_set(self):
+        if hasattr(self, 'x_test') and hasattr(self, 'y_test'):
+            return self.x_test, self.y_test
+        else:
+            raise KeyError("This dataset does not have a test set")
+
+    def get_random_perm_of_test_set(self, n):
+        if hasattr(self, 'x_test') and hasattr(self, 'y_test'):
+            np.random.seed(14)
+            perm = np.random.permutation(len(self.x_test))
+            np.random.seed()
+            return self.x_test[perm[:n]], self.y_test[perm[:n]]
+        else:
+            raise KeyError("This dataset does not have a test set")
+
+    def has_test_set(self):
+        return hasattr(self, 'x_test')
+
     def generator(self, batchsize):
         general_cursor = 0
         perm = np.random.permutation(len(self.images))
@@ -54,11 +76,12 @@ class ConditionalDataset(Dataset):
         self.attr_names = None
 
     def get_random_fixed_batch(self, n=32):
-        np.random.seed(14)
-        perm = np.random.permutation(len(self.images))
-        x_data = self.images[perm[:n]]
-        y_data = np.argmax(self.attrs[perm[:n]], axis=1)
-        np.random.seed()
+        y_categorical = np.argmax(self.attrs, axis=1)
+        _, x_data, _, y_data = sk.model_selection.train_test_split(self.images,
+                                                                   y_categorical,
+                                                                   stratify=y_categorical,
+                                                                   test_size=n,
+                                                                   random_state=14)
         return x_data, y_data
 
     def generator(self, batchsize):
@@ -250,7 +273,7 @@ class BufferedDataset(object):
         perm = np.random.permutation(len(self.buffer))
         x_data = self.buffer[perm[:n]]
         np.random.seed()
-        return x_data
+        return x_data, np.zeros((n,))
 
     def generator(self, batchsize):
         did_finish_an_epoch = False
@@ -279,32 +302,104 @@ class BufferedDataset(object):
     shape = property(_get_shape)
 
 
+class LargeDataset(object):
+
+    def __init__(self, datapath, buffer_size=100000):
+
+        self.datapath = datapath
+        self.file = h5py.File(self.datapath, 'r')
+        self.data_ref = self.file['data']
+        self.n_buffers = len(self.data_ref) // buffer_size
+        self.buffer_size = buffer_size
+        self.buffer = self.data_ref[0:self.buffer_size, ...]
+        self.current_buffer = 0
+        self.current_mirror_buffer = 1
+
+        self.load_mirror_buffer_in_background()
+
+    def load_mirror_buffer_in_background(self):
+        self.loading_thread = threading.Thread(target=self._load_mirror_buffer_worker)
+        self.loading_thread.start()
+
+    def swap_buffers(self):
+        self.loading_thread.join()
+        self.buffer = self.mirror_buffer
+        self.mirror_buffer = None
+        self.current_buffer = (self.current_buffer + 1) % self.n_buffers
+        self.current_mirror_buffer = (self.current_buffer + 1) % self.n_buffers
+        self.load_mirror_buffer_in_background()
+        print("Swapped buffer {} in. Loading buffer {}...".format(self.current_buffer, self.current_mirror_buffer))
+        did_go_around = self.current_buffer % self.n_buffers == 0
+        return did_go_around
+
+    def get_random_fixed_batch(self, n=32):
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.buffer))
+        x_data = self.buffer[perm[:n]]
+        np.random.seed()
+        return x_data, np.zeros((n,))
+
+    def generator(self, batchsize):
+        did_finish_an_epoch = False
+        general_cursor = 0
+        while not did_finish_an_epoch:
+            perm = np.random.permutation(len(self.buffer))
+            n_data = len(self.buffer)
+            for b in range(0, n_data, batchsize):
+                if batchsize > n_data - b:
+                    continue
+                general_cursor += batchsize
+                indx = perm[b:b + batchsize]
+                x_data, y_data = self.buffer[indx], np.zeros((batchsize,), dtype=np.uint8)
+                yield x_data, y_data, general_cursor
+            did_finish_an_epoch = self.swap_buffers()
+
+    def _load_mirror_buffer_worker(self):
+        current_pointer = self.buffer_size * self.current_mirror_buffer
+        next_stop = np.min((current_pointer + self.buffer_size, len(self.data_ref)))
+        self.mirror_buffer = self.data_ref[current_pointer:next_stop, ...]
+
+    def __len__(self):
+        return len(self.data_ref)
+
+    def _get_shape(self):
+        return [len(self)] + list(self.buffer.shape[1:])
+
+    shape = property(_get_shape)
+
+
 def load_dataset(dataset_name):
     if dataset_name == 'mnist':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data()
+        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data()
     elif dataset_name == 'mnist-original':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data(original=True)
+        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data(original=True)
     elif dataset_name == 'mnist-rgb':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = mnist.load_data(use_rgb=True)
+        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data(use_rgb=True)
     elif dataset_name == 'svhn':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data()
+        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = svhn.load_data()
     elif dataset_name == 'svhn-extra':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = svhn.load_data(include_extra=True)
+        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = svhn.load_data(include_extra=True)
     elif dataset_name == 'mnist-svhn':
         anchor = load_dataset('mnist-rgb')
         mirror = load_dataset('svhn')
         dataset = CrossDomainDatasets(dataset_name.replace('-', ''), anchor, mirror)
+    elif dataset_name == 'cifar10':
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
+        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = cifar10.load_data()
     elif dataset_name == 'moving-mnist':
         data = moving_mnist.load_data()
         dataset = TimeCorelatedDataset(dataset_name.replace('-', ''), data)
     elif dataset_name == 'lsun-bedroom':
         datapath = lsun.load_data()
-        dataset = BufferedDataset(datapath)
+        dataset = LargeDataset(datapath)
+    elif dataset_name == 'celeba':
+        datapath = celeba.load_data()
+        dataset = LargeDataset(datapath)
     else:
         raise KeyError("Dataset not implemented")
 

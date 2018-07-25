@@ -4,9 +4,8 @@ import numpy as np
 
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
-                          LocallyConnected2D, Add,
-                          Lambda, AveragePooling1D, GlobalAveragePooling2D)
+                          BatchNormalization, Concatenate, Add,
+                          Lambda)
 from keras.optimizers import Adam, RMSprop
 from keras import backend as K
 
@@ -14,12 +13,12 @@ from core.models import BaseModel
 from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
                            generator_lossfun)
 
-from .utils import *
-from .layers import *
+from .layers import conv2d, deconv2d
+from .utils import (set_trainable, smooth_binary_labels)
 
 
-class TOPGANwithAEfromEBGAN(BaseModel):
-    name = 'topgan_ae_ebgan'
+class TOPGANwithAEfromBEGAN(BaseModel):
+    name = 'topgan-ae-began'
     loss_names = ['g_loss', 'd_loss', 'd_triplet',
                   'g_triplet', 'ae_loss']
     loss_plot_organization = [('g_loss', 'd_loss'), 'd_triplet',
@@ -28,14 +27,14 @@ class TOPGANwithAEfromEBGAN(BaseModel):
     def __init__(self,
                  input_shape=(64, 64, 3),
                  embedding_dim=256,
-                 isolate_d_classifier=False,
                  triplet_margin=1.,
+                 n_filters_factor=32,
                  **kwargs):
         super().__init__(input_shape=input_shape, **kwargs)
 
         self.embedding_size = embedding_dim
-        self.isolate_d_classifier = isolate_d_classifier
         self.triplet_margin = triplet_margin
+        self.n_filters_factor = n_filters_factor
 
         pprint(vars(self))
 
@@ -102,9 +101,6 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         self.f_D = self.build_D()   # Sherlock, the detective
         self.f_Gx.summary()
         self.f_D.summary()
-        self.encoder.summary()
-        self.decoder.summary()
-        self.aux_classifier.summary()
 
         self.optimizers = self.build_optmizers()
         loss_d, loss_g, triplet_d_loss, triplet_g_loss = self.define_loss_functions()
@@ -130,8 +126,8 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         self.store_to_save('dis_trainer')
 
     def build_optmizers(self):
-        opt_d = Adam(lr=self.lr)
-        opt_g = Adam(lr=self.lr)
+        opt_d = Adam(lr=self.lr, beta_1=0.5)
+        opt_g = Adam(lr=self.lr, beta_1=0.5)
         opt_ae = RMSprop(lr=self.lr)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
@@ -150,11 +146,22 @@ class TOPGANwithAEfromEBGAN(BaseModel):
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
 
-        x = BasicConvLayer(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
-        x = BasicConvLayer(64, (4, 4), strides=(1, 1), bnorm=False, activation='relu')(x)
-        x = BasicConvLayer(128, (4, 4), strides=(1, 1), bnorm=True, activation='relu')(x)
-        x = BasicConvLayer(128, (4, 4), strides=(2, 2), bnorm=True, activation='relu')(x)
-        x = BasicConvLayer(256, (4, 4), strides=(1, 1), bnorm=True, activation='relu')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(inputs)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+        x = conv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu')(x)
+
+        x = conv2d(self.n_filters_factor * 2, (3, 3), activation='elu')(x)
+        x = conv2d(self.n_filters_factor * 3, (3, 3), strides=(2, 2), activation='elu')(x)
+
+        x = conv2d(self.n_filters_factor * 3, (3, 3), activation='elu')(x)
+
+        if self.input_shape[0] == 32:
+            x = conv2d(self.n_filters_factor * 3, (3, 3), activation='elu')(x)
+        elif self.input_shape[0] >= 64:
+            x = conv2d(self.n_filters_factor * 4, (3, 3), strides=(2, 2), activation='elu')(x)
+            x = conv2d(self.n_filters_factor * 4, (3, 3), activation='elu')(x)
+            x = conv2d(self.n_filters_factor * 4, (3, 3), activation='elu')(x)
+
         x = Flatten()(x)
 
         x = Dense(self.embedding_size)(x)
@@ -166,38 +173,56 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         z_input = Input(shape=(self.embedding_size,))
         orig_channels = self.input_shape[2]
 
-        w = self.input_shape[0] // 2**3
-        c = self.embedding_size // (w * w)
-        try:
-            x = Reshape((w, w, c))(z_input)
-        except ValueError:
-            raise ValueError("The embedding size must be divisible by {}*{}"
-                             " for input shape {}".format(w, w, self.input_shape))
+        x = Dense(self.n_filters_factor * 8 * 8)(z_input)
+        x = Reshape((8, 8, self.n_filters_factor))(x)
 
-        x = BasicDeconvLayer(256, (4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(128, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(64, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(32, (4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(32, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
 
-        x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
-        x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
+        if self.input_shape[0] >= 64:
+            x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
+            x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+
+        x = conv2d(orig_channels, (3, 3), activation='sigmoid')(x)
 
         return Model(z_input, x)
 
-    def build_aux_classifier(self):
+    def build_d_classifier(self):
         embedding_input = Input(shape=(self.embedding_size,))
 
         x = Dense(256)(embedding_input)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
-        x = Dense(256)(x)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
         x = Dense(1)(x)
         x = Activation('sigmoid')(x)
 
         return Model(embedding_input, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        x = Dense(self.n_filters_factor * 8 * 8)(z_input)
+        x = Reshape((8, 8, self.n_filters_factor))(x)
+
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
+        x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+
+        if self.input_shape[0] >= 64:
+            x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
+            x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+
+        x = conv2d(orig_channels, (3, 3), activation='sigmoid')(x)
+
+        return Model(z_input, x)
 
     def build_D(self):
         """
@@ -208,46 +233,28 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         self.encoder = self.build_encoder()
         x_embedding = self.encoder(x_input)
 
-        self.aux_classifier = self.build_aux_classifier()
-        discriminator = self.aux_classifier(x_embedding)
+        self.d_classifier = self.build_d_classifier()
+        discriminator = self.d_classifier(x_embedding)
 
         self.decoder = self.build_decoder()
         x_hat = self.decoder(x_embedding)
 
         return Model(x_input, [x_embedding, discriminator, x_hat])
 
-    def build_Gx(self):
-        z_input = Input(shape=(self.z_dims,))
-        orig_channels = self.input_shape[2]
-
-        w = self.input_shape[0] // 2**3
-        c = self.z_dims // (w * w)
-        try:
-            x = Reshape((w, w, c))(z_input)
-        except ValueError:
-            raise ValueError("Latent space dims must be divisible by {}*{}"
-                             " for input shape {}".format(w, w, self.input_shape))
-
-        x = BasicDeconvLayer(256, (4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(128, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(64, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(32, (4, 4), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-        x = BasicDeconvLayer(32, (4, 4), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1, padding='same')(x)
-
-        x = BasicConvLayer(32, (1, 1), strides=(1, 1), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.1)(x)
-        x = BasicConvLayer(orig_channels, (1, 1), activation='sigmoid', bnorm=False)(x)
-
-        return Model(z_input, x)
-
     """
         Define computation of metrics inputs
     """
 
     def compute_labelled_embedding(self, n=10000):
-
         x_data, y_labels = self.dataset.get_random_fixed_batch(n)
-        x_feats = self.encoder.predict(x_data, batch_size=2000)
-        self.save_precomputed_features('labelled_embedding', x_feats, Y=y_labels)
+        x_feats = self.encoder.predict(x_data, batch_size=self.batchsize)
+        if self.dataset.has_test_set():
+            x_test, y_test = self.dataset.get_random_perm_of_test_set(n=1000)
+            x_test_feats = self.encoder.predict(x_test, batch_size=self.batchsize)
+            self.save_precomputed_features('labelled_embedding', x_feats, Y=y_labels,
+                                           test_set=(x_test_feats, y_test))
+        else:
+            self.save_precomputed_features('labelled_embedding', x_feats, Y=y_labels)
         return x_feats, y_labels
 
     def compute_generated_and_real_samples(self, n=10000):
@@ -270,7 +277,7 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         return generated_images
 
     def compute_reconstruction_samples(self, n=18):
-        imgs_from_dataset, _ = self.dataset.get_random_fixed_batch(n)
+        imgs_from_dataset, _ = self.dataset.get_random_perm_of_test_set(n)
         np.random.seed(14)
         noise = np.random.normal(scale=self.input_noise, size=imgs_from_dataset.shape)
         np.random.seed()
@@ -280,13 +287,13 @@ class TOPGANwithAEfromEBGAN(BaseModel):
         return imgs_from_dataset, x_hat
 
 
-class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
-    name = 'topgan_ae_mnist'
+class TOPGANwithAESmall(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-small'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
 
-        x = BasicConvLayer(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+        x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
         x = Flatten()(x)
         x = Dense(self.embedding_size)(x)
         x = Activation('linear')(x)
@@ -303,18 +310,15 @@ class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
         x = Activation('relu')(x)
         x = Reshape((w, w, 64))(x)
 
-        x = BasicDeconvLayer(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+        x = deconv2d(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
 
         return Model(z_input, x)
 
-    def build_aux_classifier(self):
+    def build_d_classifier(self):
         embedding_input = Input(shape=(self.embedding_size,))
 
         x = Activation('relu')(embedding_input)
         x = BatchNormalization()(x)
-        x = Dense(64)(x)
-        x = BatchNormalization()(x)
-        x = Activation('relu')(x)
         x = Dense(64)(x)
         x = BatchNormalization()(x)
         x = Activation('relu')(x)
@@ -336,7 +340,66 @@ class TOPGANwithAEforMNIST(TOPGANwithAEfromEBGAN):
         x = Activation('relu')(x)
         x = Reshape((w, w, 128))(x)
 
-        x = BasicDeconvLayer(64, (4, 4), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-        x = BasicDeconvLayer(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+        x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
+
+
+class TOPGANwithAEfromDCGAN(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-dcgan'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = conv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(inputs)
+        x = conv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(inputs)
+        x = conv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(inputs)
+        x = conv2d(self.n_filters_factor * 8, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(inputs)
+
+        x = Flatten()(x)
+        x = Dense(self.embedding_size)(x)
+
+        return Model(inputs, x)
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**4
+
+        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
+        x = Reshape((w, w, self.n_filters_factor * 8))(x)
+        x = BatchNormalization()(x)
+        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+
+        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(self.embedding_size,))
+
+        x = Dense(1)(embedding_input)
+        x = Activation('sigmoid')(x)
+
+        return Model(embedding_input, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**4
+
+        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
+        x = Reshape((w, w, self.n_filters_factor * 8))(x)
+        x = BatchNormalization()(x)
+        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+
+        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
 
         return Model(z_input, x)

@@ -105,12 +105,13 @@ class BaseModel(metaclass=ABCMeta):
         # convert checkpoints to img-processed counts if not already
         # floats are interpreted as epoch fractions
         try:
-            self.checkpoint_every = int(self.checkpoint_every)
             self.notify_every = int(self.notify_every)
         except ValueError:
-            self.checkpoint_every = int(float(self.checkpoint_every)*len(dataset))
-            self.notify_every = int(float(self.notify_every)*len(dataset))
-
+            self.notify_every = int(float(self.notify_every) * len(dataset))
+        try:
+            self.checkpoint_every = int(self.checkpoint_every)
+        except ValueError:
+            self.checkpoint_every = int(float(self.checkpoint_every) * len(dataset))
 
         # Create output directories if not exist
         self.dataset = dataset
@@ -143,7 +144,7 @@ class BaseModel(metaclass=ABCMeta):
                 losses = self.train_on_batch(x_batch, y_batch=y_batch)
                 self.update_loss_history(losses)
                 self.processed_images += self.batchsize
-                self.current_fract_epoch = e + self.processed_images/len(self.dataset)
+                self.current_fract_epoch = self.processed_images / len(self.dataset)
 
                 print_current_progress(e, batch_index,
                                        batch_size=self.batchsize,
@@ -167,9 +168,9 @@ class BaseModel(metaclass=ABCMeta):
                     return
 
                 # plot samples and losses and send notification if it's checkpoint time
-                if self.processed_images % self.checkpoint_every < (self.processed_images-self.batchsize) % self.checkpoint_every:
+                if self.processed_images % self.checkpoint_every < (self.processed_images - self.batchsize) % self.checkpoint_every:
                     self.save_model(self.wgt_out_dir, self.processed_images)
-                if self.processed_images % self.notify_every < (self.processed_images-self.batchsize) % self.notify_every:
+                if self.processed_images % self.notify_every < (self.processed_images - self.batchsize) % self.notify_every:
                     self.send_metrics_notification()
 
                 self.update_loss_weights()
@@ -255,7 +256,7 @@ class BaseModel(metaclass=ABCMeta):
         return data
 
     def compute_all_metrics(self):
-        log_message = "[Metrics] Image #{} Epoch #{:04.2}: ".format(self.processed_images, self.current_fract_epoch)
+        log_message = "[Metrics] Image #{} Epoch #{}: ".format(self.processed_images, self.current_fract_epoch)
         for m, metric in self.metrics.items():
             input_data = self.gather_data_for_metric(metric.input_type)
             metric.compute_in_parallel(input_data)
@@ -320,22 +321,25 @@ class BaseModel(metaclass=ABCMeta):
         """
         return [[]] * 4
 
-    def load_precomputed_features_if_they_exist(self, feature_type, has_labels=True):
+    def load_precomputed_features_if_they_exist(self, feature_type):
         filename = os.path.join(
             self.tmp_out_dir,
             "precomputed_{}_pi{}.h5".format(feature_type, self.processed_images))
         if os.path.exists(filename):
             with h5py.File(filename, 'r') as hf:
                 x = hf['feats'][:]
-                if has_labels:
+                data = [x]
+                if 'labels' in hf:
                     y = hf['labels'][:]
-                    return x, y
-                else:
-                    return x
+                    data.append(y)
+                if 'x_test' in hf:
+                    x_test, y_test = hf['x_test'][:], hf['y_test'][:]
+                    data += [x_test, y_test]
+                return data
         else:
             return False
 
-    def save_precomputed_features(self, feature_type, X, Y=None):
+    def save_precomputed_features(self, feature_type, X, Y=None, test_set=None):
         start = time.time()
         filename = os.path.join(
             self.tmp_out_dir,
@@ -344,6 +348,10 @@ class BaseModel(metaclass=ABCMeta):
             hf.create_dataset("feats",  data=X)
             if Y is not None:
                 hf.create_dataset("labels",  data=Y)
+            if test_set is not None:
+                x_test, y_test = test_set
+                hf.create_dataset("x_test",  data=x_test)
+                hf.create_dataset("y_test",  data=y_test)
         print("[Precalc] Saving {} took {}s".format(feature_type, time.time() - start))
 
     def send_metrics_notification(self):
@@ -352,7 +360,7 @@ class BaseModel(metaclass=ABCMeta):
         did_plot = self.plot_all_metrics(outfile)
         print(log_message)
         try:
-            message = "[{}] ProcImgs #{:04} Epoch #{:04.2}".format(self.experiment_id, self.processed_images, self.current_fract_epoch)
+            message = "[{}] ProcImgs #{:04} Epoch #{}".format(self.experiment_id, self.processed_images, self.current_fract_epoch)
             notify_with_message(log_message, self.experiment_id)
             if did_plot:
                 notify_with_image(outfile, experiment_id=self.experiment_id, message=message)

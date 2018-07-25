@@ -34,7 +34,7 @@ class Loss(object):
             _, weight, lcontrol, pivot_epoch = attributes
             return cls(weight=float(weight),
                        weight_control_type=lcontrol,
-                       pivot_control_epoch=int(pivot_epoch))
+                       pivot_control_epoch=float(pivot_epoch))
         else:
             raise ValueError("Wrong format for loss control string")
 

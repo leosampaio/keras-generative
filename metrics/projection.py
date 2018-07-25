@@ -11,8 +11,11 @@ class TSNEProjection(ProjectionMetric):
     input_type = 'labelled_embedding'
 
     def compute(self, input_data):
-        x_feats, y_labels = input_data
-        x_test, y_test = x_feats[:1000], y_labels[:1000]
+        if len(input_data) == 2:
+            x_feats, y_labels = input_data
+            x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
+        else:
+            x_train, y_train, x_test, y_test = input_data
 
         tsne = TSNE(n_components=2,
                     verbose=1, perplexity=30,
@@ -27,11 +30,15 @@ class LDAProjection(ProjectionMetric):
     input_type = 'labelled_embedding'
 
     def compute(self, input_data):
-        x_feats, y_labels = input_data
-        x_test, y_test = x_feats[:1000], y_labels[:1000]
+        if len(input_data) == 2:
+            x_feats, y_labels = input_data
+            x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
+        else:
+            x_train, y_train, x_test, y_test = input_data
 
         lda = LinearDiscriminantAnalysis(n_components=2)
-        lda_result = lda.fit_transform(x_test, y_test)
+        lda.fit(x_train, y_train)
+        lda_result = lda.transform(x_test)
         return np.concatenate((lda_result, np.expand_dims(y_test, axis=1)),
                               axis=1)
 
@@ -41,10 +48,14 @@ class PCAProjection(ProjectionMetric):
     input_type = 'labelled_embedding'
 
     def compute(self, input_data):
-        x_feats, y_labels = input_data
-        x_test, y_test = x_feats[:1000], y_labels[:1000]
+        if len(input_data) == 2:
+            x_feats, y_labels = input_data
+            x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
+        else:
+            x_train, y_train, x_test, y_test = input_data
 
         pca = PCA(n_components=2)
-        pca_result = pca.fit_transform(x_test)
+        pca.fit(x_train)
+        pca_result = pca.transform(x_test)
         return np.concatenate((pca_result, np.expand_dims(y_test, axis=1)),
                               axis=1)

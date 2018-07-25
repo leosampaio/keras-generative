@@ -97,11 +97,14 @@ def BasicConvLayer(filters,
     return fun
 
 
+conv2d = BasicConvLayer
+
+
 def BasicDeconvLayer(filters,
                      kernel_size=(5, 5),
                      padding='valid',
                      strides=(1, 1),
-                     bnorm=True,
+                     bnorm=False,
                      dropout=0.0,
                      activation='leaky_relu',
                      leaky_relu_slope=0.1,
@@ -140,6 +143,9 @@ def BasicDeconvLayer(filters,
         return x
 
     return fun
+
+
+deconv2d = BasicDeconvLayer
 
 
 def ResLayer(filters,

@@ -11,8 +11,11 @@ class SVMEval(HistoryMetric):
     input_type = 'labelled_embedding'
 
     def compute(self, input_data):
-        x_feats, y_labels = input_data
-        x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
+        if len(input_data) == 2:
+            x_feats, y_labels = input_data
+            x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
+        else:
+            x_train, y_train, x_test, y_test = input_data
 
         # rescale data
         scaler = StandardScaler()
@@ -20,7 +23,7 @@ class SVMEval(HistoryMetric):
         x_test = scaler.transform(x_test)
 
         # grid search is performed on those C values
-        param_grid = [{'C': [1e1]}]
+        param_grid = [{'C': [1e1, 1e2, 1e-1]}]
 
         # get 10 stratified shuffle splits of 1000 samples (stratified meaning it
         # keeps the class distribution intact).
@@ -45,8 +48,11 @@ class SVMRBFEval(HistoryMetric):
     input_type = 'labelled_embedding'
 
     def compute(self, input_data):
-        x_feats, y_labels = input_data
-        x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
+        if len(input_data) == 2:
+            x_feats, y_labels = input_data
+            x_train, y_train, x_test, y_test = x_feats[1000:], y_labels[1000:], x_feats[:1000], y_labels[:1000]
+        else:
+            x_train, y_train, x_test, y_test = input_data
 
         # rescale data
         scaler = StandardScaler()
@@ -54,7 +60,7 @@ class SVMRBFEval(HistoryMetric):
         x_test = scaler.transform(x_test)
 
         # grid search is performed on those C values
-        param_grid = [{'C': [1e1], 'kernel': ['rbf']}]
+        param_grid = [{'C': [1e1, 1e2, 1e-1], 'kernel': ['rbf']}]
 
         # get 10 stratified shuffle splits of 1000 samples (stratified meaning it
         # keeps the class distribution intact).

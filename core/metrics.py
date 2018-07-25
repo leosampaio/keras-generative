@@ -1,5 +1,6 @@
 import threading
 from abc import ABCMeta, abstractmethod
+import numpy as np
 
 
 class Metric(object, metaclass=ABCMeta):
@@ -97,8 +98,8 @@ class ProjectionMetric(Metric):
             result = self.compute(input_data)
         except Exception as e:
             print("Exception while computing metrics: {}".format(repr(e)))
-            if not self.current_projection:
-                result = [[[0.], [0.], [0.]]]
+            if self.current_projection is None:
+                result = np.array([[0., 0., 0.]])
             else:
                 result = self.current_projection
         self.current_projection = result
