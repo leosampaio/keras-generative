@@ -16,7 +16,7 @@ from core.lossfuns import (wasserstein_dis_lossfun, wasserstein_gen_lossfun,
                            wgan_gradient_penalty_lossfun)
 
 from .utils import (set_trainable, smooth_binary_labels)
-from .layers import conv2d, deconv2d
+from .layers import conv2d, deconv2d, RandomWeightedAverage
 
 
 class ImprovedWGAN(BaseModel):
