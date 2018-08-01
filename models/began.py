@@ -198,7 +198,7 @@ class BEGAN(BaseModel):
         perm = np.random.permutation(len(self.dataset))
         np.random.seed()
 
-        generated_images = self.f_Gx.predict(samples, batch_size=2000)
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
         images_from_set = self.dataset.images[perm[:n]]
 
         self.save_precomputed_features('generated_and_real_samples', generated_images, Y=images_from_set)
@@ -209,7 +209,7 @@ class BEGAN(BaseModel):
         samples = np.random.normal(size=(n, self.z_dims))
         np.random.seed()
 
-        generated_images = self.f_Gx.predict(samples, batch_size=n)
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
         return generated_images
 
     def compute_reconstruction_samples(self, n=18):

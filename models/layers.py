@@ -5,7 +5,6 @@ from keras.layers import Activation, ELU, LeakyReLU, Dropout
 from keras.layers.merge import _Merge
 from keras import backend as K
 import tensorflow as tf
-from . import mmd
 
 
 class RandomWeightedAverage(_Merge):

@@ -1,5 +1,5 @@
 from keras import backend as K
-from keras.callbacks import Callback
+import glob
 import os
 import sys
 import numpy as np
@@ -163,7 +163,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                         label = metric_names[ii][jj]
                     else:
                         label = "line_%01d" % jj
-                    line, = ax.plot(list(range(0, len(submetric)*iterations_list[ii], iterations_list[ii])), submetric,
+                    line, = ax.plot(list(range(0, len(submetric) * iterations_list[ii], iterations_list[ii])), submetric,
                                     color='C%d' % jj,
                                     label=label)
                     lines.append(line)
@@ -172,7 +172,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                     label = metric_names[ii]
                 else:
                     label = "line_01"
-                line, = ax.plot(list(range(0, len(metric)*iterations_list[ii], iterations_list[ii])), metric, color='C0',
+                line, = ax.plot(list(range(0, len(metric) * iterations_list[ii], iterations_list[ii])), metric, color='C0',
                                 label=label)
                 lines = [line]
             if ((not isinstance(legend, (list, tuple)) and legend) or
@@ -223,3 +223,10 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
 
     plt.savefig(outfile, dpi=150, bbox_inches='tight')
     plt.close(fig)
+
+
+def remove_latest_similar_file_if_it_exists(path):
+    list_of_files = glob.glob(path)  # * means all if need specific format then *.csv
+    if list_of_files:
+        latest_file = max(list_of_files, key=os.path.getctime)
+        os.remove(latest_file)

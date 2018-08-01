@@ -1,14 +1,12 @@
 import os
-import sys
 import time
-import threading
-import queue
 import numpy as np
 import h5py
 
 from abc import ABCMeta, abstractmethod
 
-from models.utils import print_current_progress, plot_metrics
+from models.utils import (print_current_progress, plot_metrics,
+                          remove_latest_similar_file_if_it_exists)
 from core.losses import Loss
 import metrics
 
@@ -340,6 +338,8 @@ class BaseModel(metaclass=ABCMeta):
             return False
 
     def save_precomputed_features(self, feature_type, X, Y=None, test_set=None):
+        remove_latest_similar_file_if_it_exists(os.path.join(
+            self.tmp_out_dir, "precomputed_{}*".format(feature_type)))
         start = time.time()
         filename = os.path.join(
             self.tmp_out_dir,

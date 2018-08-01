@@ -39,6 +39,8 @@ class LDAProjection(ProjectionMetric):
         lda = LinearDiscriminantAnalysis(n_components=2)
         lda.fit(x_train, y_train)
         lda_result = lda.transform(x_test)
+        if lda_result.shape[1] == 1:
+            raise ValueError("To use LDA projection, you need more than 2 dimensions")
         return np.concatenate((lda_result, np.expand_dims(y_test, axis=1)),
                               axis=1)
 

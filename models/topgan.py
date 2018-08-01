@@ -262,7 +262,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         samples = np.random.normal(size=(n, self.z_dims))
         np.random.seed()
 
-        generated_images = self.f_Gx.predict(samples, batch_size=2000)
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
         images_from_set, _ = self.dataset.get_random_fixed_batch(n)
 
         self.save_precomputed_features('generated_and_real_samples', generated_images, Y=images_from_set)

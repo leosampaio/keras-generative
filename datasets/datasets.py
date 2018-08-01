@@ -97,6 +97,59 @@ class ConditionalDataset(Dataset):
             yield x_data, y_data, general_cursor
 
 
+class SimulatedAnomalyDetectionDataset(Dataset):
+
+    def __init__(self, name, x, y, anomaly_class=0, test_set=None):
+        super().__init__(name)
+        self.full_set = x
+        self.y = y
+
+        # speedup future lookups by prepreparing without the anomaly
+        ncols = y.shape[1]
+        dtype = y.dtype.descr * ncols
+        struct = y.view(dtype)
+        self.uniq = np.unique(struct)
+        anom_indx = np.where((self.y == tuple(self.uniq[anomaly_class])).all(axis=1))[0]
+        norm_indx = np.where(~(self.y == tuple(self.uniq[anomaly_class])).all(axis=1))[0]
+        self.anom_x, self.anom_y = self.full_set[anom_indx], self.y[anom_indx]
+        self.norm_x, self.norm_y = self.full_set[norm_indx], self.y[norm_indx]
+        self.anomaly_label = np.ones((len(y),), dtype=np.float32)
+        self.anomaly_label[anom_indx] = -1.
+
+        if test_set is not None:
+            self.x_test, y = test_set
+            self.y_test = np.ones((len(y),), dtype=np.float32)
+            self.y_test[np.where(y == anomaly_class)[0]] = -1.
+
+    def get_random_fixed_batch(self, n=32):
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.norm_x))
+        np.random.seed()
+        x_data = self.norm_x[perm[:n]]
+        y_data = np.ones((n,))
+        return x_data, y_data
+
+    def generator(self, batchsize):
+        general_cursor = 0
+        n_data = len(self.norm_x)
+        perm = np.random.permutation(n_data)
+        for b in range(0, n_data, batchsize):
+            if batchsize > n_data - b:
+                continue
+            general_cursor += batchsize
+            indx = perm[b:b + batchsize]
+            x_data, y_data = self.norm_x[indx], self.norm_y[indx]
+            yield x_data, y_data, general_cursor
+
+    def __len__(self):
+        return len(self.norm_x)
+
+    def _get_shape(self):
+        return self.norm_x.shape
+
+    shape = property(_get_shape)
+
+
 class CrossDomainDatasets(object):
 
     def __init__(self, name, anchor_dataset, mirror_dataset):
@@ -121,6 +174,18 @@ class CrossDomainDatasets(object):
         # while providing good sampling across both datasets
         self.mirror_permutation = np.random.permutation(len(self.mirror))
         self.current_m_index = 0
+
+    def generator(self, batchsize):
+        general_cursor = 0
+        n_data = len(self.anchor)
+        perm = np.random.permutation(n_data)
+        for b in range(0, n_data, batchsize):
+            if batchsize > n_data - b:
+                continue
+            general_cursor += batchsize
+            indx = perm[b:b + batchsize]
+            x_data, y_data = self.get_triplets(indx)
+            yield x_data, y_data, general_cursor
 
     def get_unlalabeled_pairs(self, idx, b_idx=None):
         a_x = self.anchor.images[idx]
@@ -400,6 +465,18 @@ def load_dataset(dataset_name):
     elif dataset_name == 'celeba':
         datapath = celeba.load_data()
         dataset = LargeDataset(datapath)
+    elif dataset_name == 'mnist-anomaly':
+        x, y, x_t, y_t, y_names = mnist.load_data()
+        dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),
+                                                   x, y, anomaly_class=0, test_set=(x_t, y_t))
+    elif dataset_name == 'svhn-anomaly':
+        x, y, x_t, y_t, y_names = svhn.load_data()
+        dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),
+                                                   x, y, anomaly_class=0, test_set=(x_t, y_t))
+    elif dataset_name == 'cifar10-anomaly':
+        x, y, x_t, y_t, y_names = cifar10.load_data()
+        dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),
+                                                   x, y, anomaly_class=0, test_set=(x_t, y_t))
     else:
         raise KeyError("Dataset not implemented")
 

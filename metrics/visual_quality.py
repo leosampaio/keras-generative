@@ -51,11 +51,15 @@ class RemoteInceptionScore(HistoryMetric):
             output, experiment_id,
             'tmp/precomputed_generated_and_real_samples_*')
 
-    def compute(self, input_data):
+    def get_server_ip(self):
         server = 'localhost'
         with open("server_for_inception_score.config") as f:
             server = f.readline()
             server = server.rstrip()
+        return server
+
+    def compute(self, input_data):
+        server = self.get_server_ip()
         filename = get_latest_file_from_path(self.precomputed_file_path)
         json_data = {'filename': filename}
         start = time.time()
@@ -69,6 +73,22 @@ class RemoteInceptionScore(HistoryMetric):
         response_data = json.loads(r.text)
         print("[Remote IS] Computation took {}s".format(response_data['computation_time']))
         return float(response_data['mean'])
+
+
+class MultiprocessInceptionScore(HistoryMetric):
+    name = 'm_inception_score'
+    input_type = 'generated_and_real_samples'
+
+    def __init__(self, experiment_id, output='output', **kwargs):
+        super().__init__()
+        self.precomputed_file_path = os.path.join(
+            output, experiment_id,
+            'tmp/precomputed_generated_and_real_samples_*')
+
+    def get_server_ip(self):
+        return'localhost'
+
+    compute = RemoteInceptionScore.__dict__['compute']
 
 
 class MaximumMeanDiscrepancy(HistoryMetric):
