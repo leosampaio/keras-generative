@@ -1,15 +1,20 @@
 import os
 import requests
 import glob
+import argparse
 
 import numpy as np
 import scipy as sp
+import imageio
 import h5py
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--data-folder', type=str, default='datasets/files')
+args, _ = parser.parse_known_args()
+
 url = "https://www.dropbox.com/sh/8oqt9vytwxb3s4r/AADIKlz8PR9zr6Y20qbkunrba/Img/img_align_celeba.zip?dl=1&pv=1"
-curdir = os.path.abspath(os.path.dirname(__file__))
-outdir = os.path.join(curdir, 'files')
-h5_filepath = os.path.join(outdir, 'celeba.h5')
+outdir = args.data_folder
+h5_filepath = os.path.join(outdir, 'celeba{}.h5')
 out_zipfile = os.path.join(outdir, 'celeba.zip')
 out_unzipped_folder = os.path.join(outdir, 'unzipped_celeba')
 
@@ -44,13 +49,14 @@ def preprocess_image(x, crop_size=IMG_SIZE):
     return sp.misc.imresize(x, (crop_size, crop_size)) / 255.
 
 
-def load_data():
+def load_data(image_size=64):
     """
     Load and return dataset as tuple (data, label, label_strings)
     """
 
     if not os.path.exists(out_zipfile):
         download_celeba()
+    print("Downloaded celeba!")
 
     if not os.path.exists(out_unzipped_folder):
         import zipfile
@@ -59,18 +65,19 @@ def load_data():
             zip_ref.extractall(out_unzipped_folder)
             print("Done!")
 
-    if not os.path.exists(h5_filepath):
+    h5_f_filepath = h5_filepath.format(image_size)
+    if not os.path.exists(h5_f_filepath):
         image_paths = glob.glob("{}/img_align_celeba/*.jpg".format(out_unzipped_folder))
         data_lenght = len(image_paths)
         count = 0
-        with h5py.File(h5_filepath, mode='w') as hdf5_file:
-            hdf5_file.create_dataset("data", (data_lenght, IMG_SIZE, IMG_SIZE, 3), np.float32)
+        with h5py.File(h5_f_filepath, mode='w') as hdf5_file:
+            hdf5_file.create_dataset("data", (data_lenght, image_size, image_size, 3), np.float32)
             for img_path in image_paths:
-                img = preprocess_image(sp.misc.imread(img_path))
+                img = preprocess_image(imageio.imread(img_path), crop_size=image_size)
                 hdf5_file['data'][count, ...] = img
                 count += 1
                 print('Preprocessed', count, 'images', end='\r')
-    return h5_filepath
+    return h5_f_filepath
 
 if __name__ == '__main__':
     datapath = load_data()

@@ -211,9 +211,9 @@ class WGANwithDCGAN(WGAN):
         inputs = Input(shape=self.input_shape)
 
         x = conv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', k_constraint=WeightClip(0.01))(inputs)
-        x = conv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', k_constraint=WeightClip(0.01))(inputs)
-        x = conv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', k_constraint=WeightClip(0.01))(inputs)
-        x = conv2d(self.n_filters_factor * 8, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', k_constraint=WeightClip(0.01))(inputs)
+        x = conv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', k_constraint=WeightClip(0.01))(x)
+        x = conv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', k_constraint=WeightClip(0.01))(x)
+        x = conv2d(self.n_filters_factor * 8, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', k_constraint=WeightClip(0.01))(x)
 
         x = Flatten()(x)
         x = Dense(128, kernel_constraint=WeightClip(0.01))(x)

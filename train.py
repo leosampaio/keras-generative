@@ -22,6 +22,7 @@ def main():
     parser.add_argument('--test-mode', action='store_true')
     parser.add_argument('--is-conditional', action='store_true')
     parser.add_argument('--aux-classifier', action='store_true')
+    parser.add_argument('--share-decoder-and-generator', action='store_true')
     parser.add_argument('--label-smoothing', default=0.0, type=float)
     parser.add_argument('--input-noise', default=0.0, type=float)
     parser.add_argument('--run-id', '-r', required=True)
@@ -38,6 +39,13 @@ def main():
                         help="selection of metrics you want to calculate")
     parser.add_argument('--wgan-n-critic', default=5, type=int)
     parser.add_argument('--began-gamma', default=0.5, type=float)
+    parser.add_argument('--triplet-margin', default=1., type=float)
+    parser.add_argument('--n-filters-factor', default=32, type=int)
+    parser.add_argument('--use-began-equilibrium', action='store_true')
+    parser.add_argument('--use-alignment-layer', action='store_true')
+    parser.add_argument('--use-simplified-triplet', action='store_true')
+    parser.add_argument('--data-folder', default='datasets/files')
+    parser.add_argument('--use-magan-equilibrium', action='store_true')
 
     args = parser.parse_args()
 

@@ -63,7 +63,6 @@ def print_current_progress(current_epoch, current_batch_index, batch_size, datas
 
     for k, l in losses.items():
         status_string = "{}|{}={:5.4f}".format(status_string, k, l.last_value)
-        assert not np.isnan(l.last_value)
 
     # compute ETA
     eta = elapsed_time / (current_batch_index + batch_size) * (dataset_length - (current_batch_index + batch_size))
@@ -131,7 +130,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
         grid_cols, grid_rows = 3, 5
     elif total_n_plots == 16:
         grid_cols, grid_rows = 4, 4
-    elif total_n_plots == 17 or total_n_plots == 18 or total_n_plots == 19 or total_n_plots == 19:
+    elif total_n_plots == 17 or total_n_plots == 18 or total_n_plots == 19 or total_n_plots == 20:
         grid_cols, grid_rows = 4, 5
 
     fig_w, fig_h = figsize * grid_cols, figsize * grid_rows
@@ -196,6 +195,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
 
         elif types[ii] == 'image-grid':
             imgs = metric
+            imgs = np.clip(imgs, 0., 1.)
             n_images = len(imgs)
             inner_grid_width = int(np.sqrt(n_images))
             inner_grid = GridSpecFromSubplotSpec(inner_grid_width, inner_grid_width, current_cell, wspace=0.1, hspace=0.1)

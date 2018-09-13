@@ -8,8 +8,7 @@ import functools
 
 # https://github.com/dougalsutherland/opt-mmd
 
-_eps=1e-8
-
+_eps = 1e-8
 
 
 def sq_sum(t, name=None):
@@ -32,7 +31,7 @@ def dot(x, y, name=None):
 
 
 ################################################################################
-### Quadratic-time MMD with Gaussian RBF kernel
+# Quadratic-time MMD with Gaussian RBF kernel
 
 
 def _mix_rbf_kernel(X, Y, sigmas, wts=None):
@@ -78,7 +77,7 @@ def mix_rbf_mmd2_and_ratio(X, Y, sigmas=(1,), wts=None, biased=True):
 
 
 ################################################################################
-### Helper functions to compute variances based on kernel matrices
+# Helper functions to compute variances based on kernel matrices
 
 
 def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
@@ -87,8 +86,8 @@ def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
 
     if biased:
         mmd2 = (tf.reduce_sum(K_XX) / (m * m)
-              + tf.reduce_sum(K_YY) / (n * n)
-              - 2 * tf.reduce_sum(K_XY) / (m * n))
+                + tf.reduce_sum(K_YY) / (n * n)
+                - 2 * tf.reduce_sum(K_XY) / (m * n))
     else:
         if const_diagonal is not False:
             trace_X = m * const_diagonal
@@ -98,8 +97,8 @@ def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
             trace_Y = tf.trace(K_YY)
 
         mmd2 = ((tf.reduce_sum(K_XX) - trace_X) / (m * (m - 1))
-              + (tf.reduce_sum(K_YY) - trace_Y) / (n * (n - 1))
-              - 2 * tf.reduce_sum(K_XY) / (m * n))
+                + (tf.reduce_sum(K_YY) - trace_Y) / (n * (n - 1))
+                - 2 * tf.reduce_sum(K_XY) / (m * n))
 
     return mmd2
 
@@ -115,7 +114,7 @@ def _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=False, biased=False,
 def _mmd2_and_variance(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
     m = tf.cast(K_XX.get_shape()[0], tf.float32)  # Assumes X, Y are same shape
 
-    ### Get the various sums of kernels that we'll use
+    # Get the various sums of kernels that we'll use
     # Kts drop the diagonal, but we don't need to compute them explicitly
     if const_diagonal is not False:
         const_diagonal = tf.cast(const_diagonal, tf.float32)
@@ -143,28 +142,28 @@ def _mmd2_and_variance(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
 
     Kt_XX_2_sum = sq_sum(K_XX) - sum_diag2_X
     Kt_YY_2_sum = sq_sum(K_YY) - sum_diag2_Y
-    K_XY_2_sum  = sq_sum(K_XY)
+    K_XY_2_sum = sq_sum(K_XY)
 
     if biased:
         mmd2 = ((Kt_XX_sum + sum_diag_X) / (m * m)
-              + (Kt_YY_sum + sum_diag_Y) / (m * m)
-              - 2 * K_XY_sum / (m * m))
+                + (Kt_YY_sum + sum_diag_Y) / (m * m)
+                - 2 * K_XY_sum / (m * m))
     else:
-        mmd2 = ((Kt_XX_sum + sum_diag_X) / (m * (m-1))
-              + (Kt_YY_sum + sum_diag_Y) / (m * (m-1))
-              - 2 * K_XY_sum / (m * m))
+        mmd2 = ((Kt_XX_sum + sum_diag_X) / (m * (m - 1))
+                + (Kt_YY_sum + sum_diag_Y) / (m * (m - 1))
+                - 2 * K_XY_sum / (m * m))
 
     var_est = (
-          2 / (m**2 * (m-1)**2) * (
-              2 * sq_sum(Kt_XX_sums) - Kt_XX_2_sum
+        2 / (m**2 * (m - 1)**2) * (
+            2 * sq_sum(Kt_XX_sums) - Kt_XX_2_sum
             + 2 * sq_sum(Kt_YY_sums) - Kt_YY_2_sum)
-        - (4*m-6) / (m**3 * (m-1)**3) * (Kt_XX_sum**2 + Kt_YY_sum**2)
-        + 4*(m-2) / (m**3 * (m-1)**2) * (
-              sq_sum(K_XY_sums_1) + sq_sum(K_XY_sums_0))
-        - 4 * (m-3) / (m**3 * (m-1)**2) * K_XY_2_sum
-        - (8*m - 12) / (m**5 * (m-1)) * K_XY_sum**2
-        + 8 / (m**3 * (m-1)) * (
-              1/m * (Kt_XX_sum + Kt_YY_sum) * K_XY_sum
+        - (4 * m - 6) / (m**3 * (m - 1)**3) * (Kt_XX_sum**2 + Kt_YY_sum**2)
+        + 4 * (m - 2) / (m**3 * (m - 1)**2) * (
+            sq_sum(K_XY_sums_1) + sq_sum(K_XY_sums_0))
+        - 4 * (m - 3) / (m**3 * (m - 1)**2) * K_XY_2_sum
+        - (8 * m - 12) / (m**5 * (m - 1)) * K_XY_sum**2
+        + 8 / (m**3 * (m - 1)) * (
+            1 / m * (Kt_XX_sum + Kt_YY_sum) * K_XY_sum
             - dot(Kt_XX_sums, K_XY_sums_1)
             - dot(Kt_YY_sums, K_XY_sums_0))
     )

@@ -83,6 +83,8 @@ class BaseModel(metaclass=ABCMeta):
             self.metrics = None
         # generic metric setup - end
 
+        self.batchsize = kwargs.get('batchsize', 100)
+
     def get_experiment_id(self):
         id = "{}_zdim{}".format(self.name, self.z_dims)
         for l, loss in self.losses.items():
@@ -113,7 +115,6 @@ class BaseModel(metaclass=ABCMeta):
 
         # Create output directories if not exist
         self.dataset = dataset
-        self.batchsize = batchsize
         self.processed_images = 0
         out_dir = os.path.join(self.output, self.experiment_id)
         if not os.path.isdir(out_dir):
@@ -199,7 +200,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def update_loss_history(self, new_losses):
         for l, loss in self.losses.items():
-            loss.update_history(new_losses[l] / self.batchsize)
+            loss.update_history(new_losses[l])
 
     def did_collapse(self, losses):
         return False

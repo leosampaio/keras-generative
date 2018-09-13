@@ -13,6 +13,7 @@ Returns:
 '''
 
 import tensorflow as tf
+import argparse
 import os
 import sys
 import functools
@@ -30,6 +31,7 @@ tfgan = tf.contrib.gan
 INCEPTION_URL = 'http://download.tensorflow.org/models/frozen_inception_v1_2015_12_05.tar.gz'
 INCEPTION_FROZEN_GRAPH = 'inceptionv1_for_inception_score.pb'
 INCEPTION_TAR_FILENAME = './datasets/frozen_inception_v1_2015_12_05.tar.gz'
+
 
 def get_graph_def_from_url_tarball(url=INCEPTION_URL, filename=INCEPTION_FROZEN_GRAPH, tar_filename=INCEPTION_TAR_FILENAME):
     if not (tar_filename and os.path.exists(tar_filename)):
@@ -129,12 +131,12 @@ def get_inception_score(images):
     # or mean=11.31, std=0.08 if in 10 splits (default).
     return mean, std
 
-gpu_options = tf.GPUOptions(visible_device_list='0',
-                                    allow_growth=True)
-session_conf = tf.ConfigProto(
-    intra_op_parallelism_threads=1, inter_op_parallelism_threads=1,
-    gpu_options=gpu_options,
-    allow_soft_placement=True)
+parser = argparse.ArgumentParser()
+parser.add_argument('--gpu', type=int, default=0)
+args, _ = parser.parse_known_args()
+gpu_options = tf.GPUOptions(visible_device_list=str(args.gpu),
+                            allow_growth=True)
+session_conf = tf.ConfigProto(gpu_options=gpu_options,
+                              allow_soft_placement=True)
 get_inception_score.graph = tf.Graph()
 get_inception_score.session = tf.Session(config=session_conf, graph=get_inception_score.graph)
-

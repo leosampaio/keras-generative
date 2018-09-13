@@ -188,6 +188,9 @@ def ResLayer(filters,
     return fun
 
 
+res = ResLayer
+
+
 def ResDeconvLayer(filters,
                    kernel_size=(5, 5),
                    padding='valid',

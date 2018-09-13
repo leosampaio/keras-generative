@@ -85,5 +85,15 @@ class Loss(object):
     def get_mean_of_latest(self, n=1000):
         if len(self.history) > n:
             return np.mean(self.history[-n:])
+        elif len(self.history) == 0:
+            return 0
         else:
             return np.mean(self.history)
+
+    def get_std_of_latest(self, n=1000):
+        if len(self.history) > n:
+            return np.std(self.history[-n:])
+        elif len(self.history) == 0:
+            return 0
+        else:
+            return np.std(self.history)

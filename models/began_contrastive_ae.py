@@ -5,38 +5,38 @@ import numpy as np
 
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
-                          BatchNormalization, Concatenate, Dropout, LeakyReLU,
-                          LocallyConnected2D, Add,
-                          Lambda, AveragePooling1D, GlobalAveragePooling2D,
-                          UpSampling2D)
-from keras.optimizers import Adam
+                          BatchNormalization, Concatenate, Add,
+                          Lambda)
+from keras.optimizers import Adam, RMSprop
 from keras import backend as K
 
 from core.models import BaseModel
-from core.lossfuns import (began_gen_lossfun, began_dis_lossfun,
-                           began_convergence_lossfun)
+from core.lossfuns import (con_began_gen_lossfun, con_began_dis_lossfun_creator,
+                           con_began_convergence_lossfun_creator,
+                           con_began_ae_lossfun)
 
-from .utils import set_trainable
-from .layers import conv2d, deconv2d
+from .layers import conv2d, deconv2d, res
+from .utils import (set_trainable, smooth_binary_labels)
 
 
-class BEGAN(BaseModel):
-    name = 'began-small'
+class BeganwithContrastiveAE(BaseModel):
+    name = 'began-con-ae-small'
     loss_names = ['g_loss', 'd_loss', 'gd_ratio', 'convergence_measure']
-    loss_plot_organization = [('g_loss', 'd_loss'), 'convergence_measure', 'gd_ratio']
+    loss_plot_organization = [('g_loss', 'd_loss'),
+                              'gd_ratio', 'convergence_measure']
 
     def __init__(self,
                  input_shape=(64, 64, 3),
                  embedding_dim=256,
-                 began_gamma=0.5,
                  n_filters_factor=32,
+                 began_gamma=0.5,
                  began_k_lr=1e-3,
                  **kwargs):
         super().__init__(input_shape=input_shape, **kwargs)
 
         self.embedding_size = embedding_dim
-        self.gamma = began_gamma
         self.n_filters_factor = n_filters_factor
+        self.gamma = began_gamma
         self.k_lr = began_k_lr
 
         pprint(vars(self))
@@ -49,10 +49,10 @@ class BEGAN(BaseModel):
 
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
+        dummy_y = np.zeros((batchsize, 1, 1,))
 
         input_data = [x_data, z_latent_dis]
-        expanded_x = np.expand_dims(x_data, -1)
-        label_data = [expanded_x, expanded_x, expanded_x]
+        label_data = [dummy_y, dummy_y, dummy_y]
 
         # train both networks
         ld = {}  # loss dictionary
@@ -60,7 +60,7 @@ class BEGAN(BaseModel):
         _, ld['g_loss'], ld['ae_loss'], ld['convergence_measure'] = self.gen_trainer.train_on_batch(input_data, label_data)
 
         # update k
-        ld['gd_ratio'] = np.clip(K.get_value(self.k_gd_ratio) + self.k_lr * (self.gamma * ld['ae_loss'] - ld['g_loss']), 0, 1)
+        ld['gd_ratio'] = K.get_value(self.k_gd_ratio) + self.k_lr * (self.gamma * ld['ae_loss'] - ld['g_loss'])
         K.set_value(self.k_gd_ratio, ld['gd_ratio'])
 
         return ld
@@ -69,21 +69,28 @@ class BEGAN(BaseModel):
         input_x = Input(shape=self.input_shape)
         input_z = Input(shape=(self.z_dims,))
 
-        x_hat = self.f_Gx(input_z)
+        slice_half = Lambda(lambda x: x[:self.batchsize // 2])
+        slice_other_half = Lambda(lambda x: x[self.batchsize // 2:])
 
-        x_hat_reconstructed = self.f_D(x_hat)
-        x_reconstructed = self.f_D(input_x)
+        con_half_x = slice_half(input_x)
+        half_x = slice_other_half(input_x)
+        x_hat = self.f_Gx(input_z)
+        con_half_x_hat = slice_half(x_hat)
+        half_x_hat = slice_other_half(x_hat)
+
+        half_x_hat_reconstructed = self.f_D(half_x_hat)
+        half_x_reconstructed = self.f_D(half_x)
 
         input = [input_x, input_z]
 
-        x_hat = Reshape(list(self.input_shape) + [1])(x_hat)
-        x_hat_reconstructed = Reshape(list(self.input_shape) + [1])(x_hat_reconstructed)
-        x_reconstructed = Reshape(list(self.input_shape) + [1])(x_reconstructed)
-
-        concatenated_dis = Concatenate(axis=-1, name="ae")([x_hat,
-                                                            x_hat_reconstructed,
-                                                            x_reconstructed])
-        output = [concatenated_dis, x_hat, concatenated_dis]
+        concatenated_dis = Concatenate(axis=-1, name="ae")(
+            [Reshape((-1, 1))(half_x_hat),
+             Reshape((-1, 1))(con_half_x_hat),
+             Reshape((-1, 1))(half_x_hat_reconstructed),
+             Reshape((-1, 1))(half_x),
+             Reshape((-1, 1))(con_half_x),
+             Reshape((-1, 1))(half_x_reconstructed)])
+        output = [concatenated_dis, concatenated_dis, concatenated_dis]
         return Model(input, output, name='began')
 
     def build_model(self):
@@ -95,18 +102,15 @@ class BEGAN(BaseModel):
 
         self.optimizers = self.build_optmizers()
         self.k_gd_ratio = K.variable(0)  # initialize k
-        dis_lossfun = partial(began_dis_lossfun, k_gd_ratio=self.k_gd_ratio)
-        dis_lossfun.__name__ = 'began_dis_loss'
-
-        convergence_lossfun = partial(began_convergence_lossfun, gamma=self.gamma)
-        convergence_lossfun.__name__ = 'convergence_lossfun'
+        dis_lossfun = con_began_dis_lossfun_creator(k_gd_ratio=self.k_gd_ratio)
+        convergence_lossfun = con_began_convergence_lossfun_creator(gamma=self.gamma)
 
         # build discriminator
         self.dis_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
-                                 loss=[dis_lossfun, 'mae', convergence_lossfun],
+                                 loss=[dis_lossfun, con_began_ae_lossfun, convergence_lossfun],
                                  loss_weights=[1., 0., 0.])
 
         # build generator
@@ -114,12 +118,8 @@ class BEGAN(BaseModel):
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
-                                 loss=[began_gen_lossfun, 'mae', convergence_lossfun],
+                                 loss=[con_began_gen_lossfun, con_began_ae_lossfun, convergence_lossfun],
                                  loss_weights=[1., 0., 0.])
-
-        # store trainers
-        self.store_to_save('gen_trainer')
-        self.store_to_save('dis_trainer')
 
     def build_optmizers(self):
         return {"opt_d": Adam(lr=self.lr),
@@ -226,8 +226,9 @@ class BEGAN(BaseModel):
         return imgs_from_dataset, x_hat
 
 
-class BEGANwithDCGAN(BEGAN):
-    name = 'began-dcgan'
+
+class BeganwithContrastiveAEfromDCGAN(BeganwithContrastiveAE):
+    name = 'began-con-ae-dcgan'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -277,8 +278,8 @@ class BEGANwithDCGAN(BEGAN):
         return Model(z_input, x)
 
 
-class BEGANwithBEGAN(BEGAN):
-    name = 'began-began'
+class BeganwithContrastiveAEwithBEGAN(BeganwithContrastiveAE):
+    name = 'began-con-ae-began'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -315,19 +316,16 @@ class BEGANwithBEGAN(BEGAN):
 
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
-        x = UpSampling2D()(x)
-        x = conv2d(self.n_filters_factor, (3, 3), activation='elu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
-        x = UpSampling2D()(x)
-        x = conv2d(self.n_filters_factor, (3, 3), activation='elu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
 
         if self.input_shape[0] >= 64:
-            x = UpSampling2D()(x)
-            x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+            x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
             x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
 
-        x = conv2d(orig_channels, (3, 3), activation=None)(x)
+        x = conv2d(orig_channels, (3, 3), activation='sigmoid')(x)
 
         return Model(z_input, x)
 
@@ -340,18 +338,15 @@ class BEGANwithBEGAN(BEGAN):
 
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
-        x = UpSampling2D()(x)
-        x = conv2d(self.n_filters_factor, (3, 3), activation='elu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
-        x = UpSampling2D()(x)
-        x = conv2d(self.n_filters_factor, (3, 3), activation='elu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
         x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
 
         if self.input_shape[0] >= 64:
-            x = UpSampling2D()(x)
-            x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
+            x = deconv2d(self.n_filters_factor * 2, (3, 3), strides=(2, 2), activation='elu', padding='same')(x)
             x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
 
-        x = conv2d(orig_channels, (3, 3), activation=None)(x)
+        x = conv2d(orig_channels, (3, 3), activation='sigmoid')(x)
 
         return Model(z_input, x)

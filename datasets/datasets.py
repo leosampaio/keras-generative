@@ -369,10 +369,12 @@ class BufferedDataset(object):
 
 class LargeDataset(object):
 
-    def __init__(self, datapath, buffer_size=100000):
+    def __init__(self, datapath, buffer_size=50000):
 
         self.datapath = datapath
+        print("Reading H5 file... ", end="")
         self.file = h5py.File(self.datapath, 'r')
+        print("Done!")
         self.data_ref = self.file['data']
         self.n_buffers = len(self.data_ref) // buffer_size
         self.buffer_size = buffer_size
@@ -381,6 +383,15 @@ class LargeDataset(object):
         self.current_mirror_buffer = 1
 
         self.load_mirror_buffer_in_background()
+
+    def get_test_set(self):
+        if hasattr(self, 'x_test') and hasattr(self, 'y_test'):
+            return self.x_test, self.y_test
+        else:
+            raise KeyError("This dataset does not have a test set")
+
+    def has_test_set(self):
+        return hasattr(self, 'x_test')
 
     def load_mirror_buffer_in_background(self):
         self.loading_thread = threading.Thread(target=self._load_mirror_buffer_worker)
@@ -464,7 +475,10 @@ def load_dataset(dataset_name):
         dataset = LargeDataset(datapath)
     elif dataset_name == 'celeba':
         datapath = celeba.load_data()
-        dataset = LargeDataset(datapath)
+        dataset = LargeDataset(datapath, buffer_size=20000)
+    elif dataset_name == 'celeba-128':
+        datapath = celeba.load_data(image_size=128)
+        dataset = LargeDataset(datapath, buffer_size=5000)
     elif dataset_name == 'mnist-anomaly':
         x, y, x_t, y_t, y_names = mnist.load_data()
         dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),
