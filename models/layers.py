@@ -1,7 +1,7 @@
 import keras
 from keras.engine.topology import Layer
 from keras.layers import Conv2D, BatchNormalization, Conv2DTranspose
-from keras.layers import Activation, ELU, LeakyReLU, Dropout
+from keras.layers import Activation, ELU, LeakyReLU, Dropout, Lambda
 from keras.layers.merge import _Merge
 from keras import backend as K
 import tensorflow as tf
@@ -50,11 +50,16 @@ class MinibatchDiscrimination(Layer):
         return (input_shape[0], self.kernels)
 
 
+def LayerNorm():
+    return Lambda(lambda x: K.tf.contrib.layers.layer_norm(x))
+
+
 def BasicConvLayer(filters,
                    kernel_size=(5, 5),
                    padding='same',
                    strides=(1, 1),
-                   bnorm=True,
+                   bnorm=False,
+                   lnorm=False,
                    dropout=0.0,
                    activation='leaky_relu',
                    leaky_relu_slope=0.1,
@@ -70,6 +75,7 @@ def BasicConvLayer(filters,
                   padding=padding,
                   kernel_constraint=k_constraint)
     bn = BatchNormalization()
+    ln = LayerNorm()
 
     def fun(inputs):
 
@@ -80,6 +86,8 @@ def BasicConvLayer(filters,
 
         if bnorm:
             x = bn(x)
+        elif lnorm:
+            x = ln(x)
 
         if activation == 'leaky_relu':
             x = LeakyReLU(leaky_relu_slope)(x)
@@ -104,6 +112,7 @@ def BasicDeconvLayer(filters,
                      padding='valid',
                      strides=(1, 1),
                      bnorm=False,
+                     lnorm=False,
                      dropout=0.0,
                      activation='leaky_relu',
                      leaky_relu_slope=0.1,
@@ -118,6 +127,7 @@ def BasicDeconvLayer(filters,
                            bias_initializer=bias_init,
                            padding=padding)
     bn = BatchNormalization()
+    ln = LayerNorm()
 
     def fun(inputs):
 
@@ -128,6 +138,8 @@ def BasicDeconvLayer(filters,
 
         if bnorm:
             x = bn(x)
+        elif lnorm:
+            x = ln(x)
 
         if activation == 'leaky_relu':
             x = LeakyReLU(leaky_relu_slope)(x)

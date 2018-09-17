@@ -207,6 +207,13 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
                     inner_ax.imshow(imgs[i, :, :], cmap='gray', interpolation='none', vmin=0.0, vmax=1.0)
                 inner_ax.axis('off')
 
+        elif types[ii] == 'hist':
+            ax = plt.subplot(current_cell)
+            ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+            lines = ax.hist(metric, bins=100)
+            patch = mpatches.Patch(color='silver', label=metric_names[ii])
+            ax.legend(handles=[patch], prop={'size': 20})
+
         if ax is not None:
             if x_label is not None and not isinstance(x_label, (list, tuple)):
                 ax.set_xlabel(x_label, color='k')

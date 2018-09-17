@@ -144,3 +144,35 @@ class ImageSamplesMetric(Metric):
             return 'image-grid'
         else:
             return 'waiting'
+
+
+class HistogramMetric(Metric):
+    plot_type = 'hist'
+
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.current_hist = None
+
+    def computation_worker(self, input_data):
+        try:
+            result = self.compute(input_data)
+        except Exception as e:
+            print("Exception while computing metrics: {}".format(repr(e)))
+            if self.current_hist is None:
+                result = np.array([0.])
+            else:
+                result = self.current_hist
+        self.current_hist = result
+
+    def get_data_for_plot(self):
+        return self.current_hist
+
+    def is_ready_for_plot(self):
+        return self.current_hist is not None
+
+    @property
+    def last_value_repr(self):
+        if self.current_hist is not None:
+            return 'plotted'
+        else:
+            return 'waiting'

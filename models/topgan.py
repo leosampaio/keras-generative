@@ -1,6 +1,7 @@
 from pprint import pprint
 
 import numpy as np
+import sklearn as sk
 
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
@@ -15,7 +16,7 @@ from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
                            eq_triplet_lossfun_creator,
                            triplet_std_creator)
 
-from .layers import conv2d, deconv2d
+from .layers import conv2d, deconv2d, LayerNorm
 from .utils import (set_trainable, smooth_binary_labels)
 
 
@@ -351,6 +352,25 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         self.save_precomputed_features('generated_and_real_samples', generated_images, Y=images_from_set)
         return images_from_set, generated_images
+
+    def compute_triplet_distance_vectors(self, n=5000):
+        np.random.seed(14)
+        samples = np.random.normal(size=(n, self.z_dims))
+        np.random.seed()
+
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
+        images_from_set, _ = self.dataset.get_random_fixed_batch(n)
+
+        encoded_x_hat = self.encoder.predict(generated_images)
+        encoded_x = self.encoder.predict(images_from_set)
+        encoded_x_r = sk.utils.shuffle(encoded_x)
+
+        d_p = np.sqrt(np.maximum(np.finfo(float).eps, np.sum(np.square(encoded_x - encoded_x_r), axis=1)))
+        d_n = np.sqrt(np.maximum(np.finfo(float).eps, np.sum(np.square(encoded_x - encoded_x_hat), axis=1)))        
+        triplet = d_n - d_p
+
+        self.save_precomputed_features('triplet_distance_vectors', triplet)
+        return triplet
 
     def compute_generated_image_samples(self, n=36):
         np.random.seed(14)
@@ -733,5 +753,66 @@ class TOPGANwithAEmlp(TOPGANwithAEfromBEGAN):
         x = Dense(np.prod(self.input_shape))(x)
         x = Activation('sigmoid')(x)
         x = Reshape(self.input_shape)(x)
+
+        return Model(z_input, x)
+
+
+class TOPGANwithAESmallLN(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-small-ln'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+        x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+        x = Flatten()(x)
+        x = Dense(self.embedding_size)(x)
+        x = Activation('linear')(x)
+
+        return Model(inputs, x)
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**2  # starting width
+        x = Dense(128 * w * w)(z_input)
+        x = LayerNorm()(x)
+        x = Activation('relu')(x)
+        x = Reshape((w, w, 128))(x)
+
+        x = deconv2d(64, (4, 4), strides=(2, 2), lnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(self.embedding_size,))
+
+        x = Activation('relu')(embedding_input)
+        x = LayerNorm()(x)
+        x = Dense(64)(x)
+        x = LayerNorm()(x)
+        x = Activation('relu')(x)
+        x = Dense(1)(x)
+        x = Activation('sigmoid')(x)
+
+        return Model(embedding_input, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**2  # starting width
+        x = Dense(1024)(z_input)
+        x = LayerNorm()(x)
+        x = Activation('relu')(x)
+        x = Dense(128 * w * w)(z_input)
+        x = LayerNorm()(x)
+        x = Activation('relu')(x)
+        x = Reshape((w, w, 128))(x)
+
+        x = deconv2d(64, (4, 4), strides=(2, 2), lnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
 
         return Model(z_input, x)

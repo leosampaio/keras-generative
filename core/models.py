@@ -175,7 +175,7 @@ class BaseModel(metaclass=ABCMeta):
                 self.update_loss_weights()
 
             elapsed_time = time.time() - start_time
-            print('Took: {}s\n'.format(elapsed_time))
+            print('\nTook: {}s\n'.format(elapsed_time))
             self.did_train_over_an_epoch()
 
     def update_loss_weights(self):
@@ -260,6 +260,8 @@ class BaseModel(metaclass=ABCMeta):
             input_data = self.gather_data_for_metric(metric.input_type)
             metric.compute_in_parallel(input_data)
             log_message = "{} {}: {},".format(log_message, m, metric.last_value_repr)
+        for l, loss in self.losses.items():
+            log_message = "{} {}: {}*{},".format(log_message, l, loss.last_value, loss.current_weight)
         return log_message
 
     def plot_all_metrics(self, outfile):
@@ -346,13 +348,13 @@ class BaseModel(metaclass=ABCMeta):
             self.tmp_out_dir,
             "precomputed_{}_pi{}.h5".format(feature_type, self.processed_images))
         with h5py.File(filename, 'w') as hf:
-            hf.create_dataset("feats",  data=X)
+            hf.create_dataset("feats", data=X)
             if Y is not None:
-                hf.create_dataset("labels",  data=Y)
+                hf.create_dataset("labels", data=Y)
             if test_set is not None:
                 x_test, y_test = test_set
-                hf.create_dataset("x_test",  data=x_test)
-                hf.create_dataset("y_test",  data=y_test)
+                hf.create_dataset("x_test", data=x_test)
+                hf.create_dataset("y_test", data=y_test)
         print("[Precalc] Saving {} took {}s".format(feature_type, time.time() - start))
 
     def send_metrics_notification(self):
