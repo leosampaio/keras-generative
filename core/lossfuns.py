@@ -5,9 +5,27 @@ import numpy as np
 def triplet_lossfun_creator(margin=1., zdims=256, inverted=False, simplified=False):
     def triplet_lossfun(_, y_pred):
 
-        m = K.ones((K.shape(y_pred)[0],))*margin
+        m = K.ones((K.shape(y_pred)[0],)) * margin
         zero = K.zeros((K.shape(y_pred)[0],))
         a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        d_p = K.sqrt(K.maximum(K.epsilon(), K.sum(K.square(a - p), axis=1)))
+        d_n = K.sqrt(K.maximum(K.epsilon(), K.sum(K.square(a - n), axis=1)))
+        if inverted:
+            return K.mean(K.maximum(zero, - d_p + d_n))
+        elif simplified:
+            return K.mean(K.maximum(zero, m - d_p))
+        else:
+            return K.mean(K.maximum(zero, m + d_p - d_n))
+
+    return triplet_lossfun
+
+
+def generic_triplet_lossfun_creator(margin=1., inverted=False, simplified=False):
+    def triplet_lossfun(_, y_pred):
+
+        m = K.ones((K.shape(y_pred)[0],)) * margin
+        zero = K.zeros((K.shape(y_pred)[0],))
+        a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         d_p = K.sqrt(K.maximum(K.epsilon(), K.sum(K.square(a - p), axis=1)))
         d_n = K.sqrt(K.maximum(K.epsilon(), K.sum(K.square(a - n), axis=1)))
         if inverted:

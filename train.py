@@ -46,6 +46,9 @@ def main():
     parser.add_argument('--use-simplified-triplet', action='store_true')
     parser.add_argument('--data-folder', default='datasets/files')
     parser.add_argument('--use-magan-equilibrium', action='store_true')
+    parser.add_argument('--topgan-enforce-std-dev', action='store_true')
+    parser.add_argument('--topgan-use-data-trilet-regularization', action='store_true')
+    parser.add_argument('--use-began-loss', action='store_true')
 
     args = parser.parse_args()
 

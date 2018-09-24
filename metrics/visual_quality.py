@@ -9,7 +9,7 @@ import numpy as np
 import tensorflow as tf
 import keras.backend as K
 
-from core.metrics import HistoryMetric
+from core.metrics import HistoryMetric, ProjectionMetric
 from metrics import inception_score
 from metrics import mmd
 
@@ -107,3 +107,17 @@ class MaximumMeanDiscrepancy(HistoryMetric):
         x_hat, x = input_data
         mmd = K.get_session().run(self.mmd_computer, feed_dict={'mmd_x:0': x, 'mmd_x_hat:0': x_hat})
         return mmd
+
+
+class SyntheticDatasetVis(ProjectionMetric):
+    name = 'synthetic-data-vis'
+    input_type = 'generated_and_real_samples'
+
+    def compute(self, input_data):
+        x_hat, x = input_data
+
+        y = np.concatenate((np.zeros((len(x_hat),)), np.ones((len(x),))))
+        x_all = np.concatenate((x_hat, x), axis=0)
+
+        return np.concatenate((x_all, np.expand_dims(y, axis=1)),
+                              axis=1)

@@ -8,13 +8,13 @@ from keras.layers import (Flatten, Dense, Activation, Reshape,
                           BatchNormalization, Concatenate, Add,
                           Lambda, Conv1D, UpSampling2D)
 from keras.optimizers import Adam
-from keras import backend as K
+from keras import backend as K, regularizers
 
 from core.models import BaseModel
 from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
                            generator_lossfun, triplet_balance_creator,
                            eq_triplet_lossfun_creator,
-                           triplet_std_creator)
+                           triplet_std_creator, generic_triplet_lossfun_creator)
 
 from .layers import conv2d, deconv2d, LayerNorm
 from .utils import (set_trainable, smooth_binary_labels)
@@ -22,11 +22,6 @@ from .utils import (set_trainable, smooth_binary_labels)
 
 class TOPGANwithAEfromBEGAN(BaseModel):
     name = 'topgan-ae-began'
-    loss_names = ['g_loss', 'd_loss', 'd_triplet',
-                  'g_triplet', 'ae_loss', 'k', 'margin', 'g_std', 'g_mean']
-    loss_plot_organization = [('g_loss', 'd_loss'), 'd_triplet',
-                              'g_triplet', 'ae_loss', 'k',
-                              'margin', ('g_std', 'g_mean')]
 
     def __init__(self,
                  input_shape=(64, 64, 3),
@@ -38,8 +33,26 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                  use_alignment_layer=False,
                  began_gamma=0.5,
                  use_simplified_triplet=False,
-                 use_magan_equilibrium=True,
+                 use_magan_equilibrium=False,
+                 topgan_enforce_std_dev=False,
+                 topgan_use_data_trilet_regularization=False,
+                 use_began_loss=False,
                  **kwargs):
+
+        self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
+                           'g_triplet', 'ae_loss', 'g_std', 'g_mean']
+        self.loss_plot_organization = [('g_loss', 'd_loss'), 'd_triplet',
+                                       'g_triplet', 'ae_loss', ('g_std', 'g_mean')]
+        if use_magan_equilibrium:
+            self.loss_names += ['margin']
+            self.loss_plot_organization += ['margin']
+        if use_alignment_layer or use_began_equilibrium:
+            self.loss_names += ['k']
+            self.loss_plot_organization += ['k']
+        if topgan_use_data_trilet_regularization:
+            self.loss_names += ['data_triplet']
+            self.loss_plot_organization += ['data_triplet']
+
         super().__init__(input_shape=input_shape, **kwargs)
 
         self.embedding_size = embedding_dim
@@ -52,6 +65,9 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         self.use_simplified_triplet = use_simplified_triplet
         self.use_magan_equilibrium = use_magan_equilibrium
         self.did_set_g_triplet_count = 0
+        self.enforce_std_dev = topgan_enforce_std_dev
+        self.use_data_trilet_regularization = topgan_use_data_trilet_regularization
+        self.use_began_loss = use_began_loss
 
         if self.use_magan_equilibrium:
             self.gamma = 1.
@@ -77,13 +93,14 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             noise = np.zeros(x_data.shape)
 
         x_permutation = np.array(np.random.permutation(batchsize), dtype='int64')
+        dummy_y = np.expand_dims(y, axis=-1)
         input_data = [x_data, noise, x_permutation, z_latent_dis]
-        label_data = [y, y, x_data, y, y]
+        label_data = [y, y, x_data, y, y, dummy_y]
 
         # train both networks
         ld = {}  # loss dictionary
-        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'], _, _ = self.dis_trainer.train_on_batch(input_data, label_data)
-        _, ld['g_loss'], ld['g_triplet'], _, ld['g_mean'], ld['g_std'] = self.gen_trainer.train_on_batch(input_data, label_data)
+        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'], _, _, _ = self.dis_trainer.train_on_batch(input_data, label_data)
+        _, ld['g_loss'], ld['g_triplet'], _, ld['g_mean'], ld['g_std'], ld['data_triplet'] = self.gen_trainer.train_on_batch(input_data, label_data)
         if self.use_alignment_layer:
             _, _, _, _, balance, _ = self.alignment_layer_trainer.train_on_batch(input_data, label_data)
         if self.use_began_equilibrium:
@@ -118,24 +135,29 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         negative_embedding, p, _ = self.f_D(x_hat)
         anchor_embedding, q, _ = self.f_D(input_x)
-        positive_embedding = Lambda(lambda x: K.squeeze(K.gather(anchor_embedding, input_x_perm), 1))(anchor_embedding)
+        shuffled_x = Lambda(lambda x: K.gather(x, input_x_perm))(input_x)
+        positive_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(anchor_embedding)
         _, _, x_reconstructed = self.f_D(x_noisy)
+
+        fix_dim = Reshape((-1, 1))
 
         input = [input_x, input_noise, input_x_perm, input_z]
 
         concatenated_dis = Concatenate(axis=-1, name="dis_classification")([p, q])
         concatenated_triplet = Concatenate(axis=-1, name="triplet")(
             [anchor_embedding, positive_embedding, negative_embedding])
+        concatenated_data_triplet = Concatenate(axis=-1, name="data_triplet")(
+            [fix_dim(input_x), fix_dim(shuffled_x), fix_dim(x_hat)])
 
         if self.use_alignment_layer:
             aligned_negative_embedding = self.alignment_layer(negative_embedding)
             concatenated_aligned_triplet = Concatenate(axis=-1, name="aligned_triplet")(
                 [anchor_embedding, positive_embedding, aligned_negative_embedding])
             output = [concatenated_dis, concatenated_triplet, x_reconstructed,
-                      concatenated_aligned_triplet, concatenated_aligned_triplet]
+                      concatenated_aligned_triplet, concatenated_aligned_triplet, concatenated_data_triplet]
         else:
             output = [concatenated_dis, concatenated_triplet, x_reconstructed,
-                      concatenated_triplet, concatenated_triplet]
+                      concatenated_triplet, concatenated_triplet, concatenated_data_triplet]
         return Model(input, output, name='topgan')
 
     def build_model(self):
@@ -148,7 +170,17 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         self.optimizers = self.build_optmizers()
         self.k_gd_ratio = K.variable(0)
-        loss_d, loss_g, triplet_d_loss, triplet_g_loss, t_mean, t_std = self.define_loss_functions()
+        loss_d, loss_g, triplet_d_loss, triplet_g_loss, t_mean, t_std, x_triplet = self.define_loss_functions()
+
+        if self.enforce_std_dev:
+            std_dev_weight = -0.01
+        else:
+            std_dev_weight = 0.
+
+        if self.use_data_trilet_regularization:
+            x_triplet_weight = .1
+        else:
+            x_triplet_weight = 0.
 
         if self.use_alignment_layer:
             self.alignment_layer.summary()
@@ -160,15 +192,15 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                 optimizer=self.optimizers["opt_ae"],
                 loss=[loss_d, triplet_d_loss, 'mse', triplet_g_loss],
                 loss_weights=[0, 0, 0, 1.])
-            loss_weights = [self.losses['d_loss'].backend, 0, self.losses['ae_loss'].backend, self.losses['d_triplet'].backend, 0.]
+            loss_weights = [self.losses['d_loss'].backend, 0, self.losses['ae_loss'].backend, self.losses['d_triplet'].backend, std_dev_weight, 0.]
             set_trainable(self.alignment_layer, False)
         else:
-            loss_weights = [self.losses['d_loss'].backend, self.losses['d_triplet'].backend, self.losses['ae_loss'].backend, 0., 0.]
+            loss_weights = [self.losses['d_loss'].backend, self.losses['d_triplet'].backend, self.losses['ae_loss'].backend, 0., std_dev_weight, 0.]
         self.dis_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
-                                 loss=[loss_d, triplet_d_loss, 'mse', triplet_d_loss, t_std],
+                                 loss=[loss_d, triplet_d_loss, 'mse', triplet_d_loss, t_std, x_triplet],
                                  loss_weights=loss_weights)
 
         # build generators
@@ -176,8 +208,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
-                                 loss=[loss_g, triplet_g_loss, 'mse', t_mean, t_std],
-                                 loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, self.losses['ae_loss'].backend, 0., 0.])
+                                 loss=[loss_g, triplet_g_loss, 'mse', t_mean, t_std, x_triplet],
+                                 loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, self.losses['ae_loss'].backend, 0., 0., x_triplet_weight])
 
         # store trainers
         self.store_to_save('gen_trainer')
@@ -205,7 +237,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                 triplet_d,
                 triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, inverted=True),
                 triplet_balance_creator(margin=self.triplet_margin, zdims=self.embedding_size, gamma=K.variable(self.gamma)),
-                triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size))
+                triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size),
+                generic_triplet_lossfun_creator(margin=self.triplet_margin, inverted=True))
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -366,7 +399,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         encoded_x_r = sk.utils.shuffle(encoded_x)
 
         d_p = np.sqrt(np.maximum(np.finfo(float).eps, np.sum(np.square(encoded_x - encoded_x_r), axis=1)))
-        d_n = np.sqrt(np.maximum(np.finfo(float).eps, np.sum(np.square(encoded_x - encoded_x_hat), axis=1)))        
+        d_n = np.sqrt(np.maximum(np.finfo(float).eps, np.sum(np.square(encoded_x - encoded_x_hat), axis=1)))
         triplet = d_n - d_p
 
         self.save_precomputed_features('triplet_distance_vectors', triplet)
@@ -814,5 +847,53 @@ class TOPGANwithAESmallLN(TOPGANwithAEfromBEGAN):
 
         x = deconv2d(64, (4, 4), strides=(2, 2), lnorm=True, activation='relu', padding='same')(x)
         x = deconv2d(orig_channels, (4, 4), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
+
+
+class TOPGANwithAEmlpSynth(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-mlp-synth'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = Dense(512)(inputs)
+        x = Activation('relu')(x)
+        x = Dense(512)(x)
+
+        x = Activation('relu')(x)
+        x = Dense(self.embedding_size, activity_regularizer=regularizers.l2(0.01))(x)
+        # x = Dense(self.embedding_size)(x)
+        x = Activation('relu')(x)
+
+        return Model(inputs, x)
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+
+        x = Dense(512)(z_input)
+        x = Activation('relu')(x)
+        x = Dense(512)(x)
+        x = Activation('relu')(x)
+        x = Dense(np.prod(self.input_shape))(x)
+
+        return Model(z_input, x)
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(self.embedding_size,))
+
+        x = Activation('relu')(embedding_input)
+        x = Dense(1)(x)
+
+        return Model(embedding_input, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+
+        x = Dense(512)(z_input)
+        x = Activation('relu')(x)
+        x = Dense(512)(x)
+        x = Activation('relu')(x)
+        x = Dense(np.prod(self.input_shape))(x)
 
         return Model(z_input, x)

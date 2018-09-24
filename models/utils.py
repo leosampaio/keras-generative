@@ -62,7 +62,10 @@ def print_current_progress(current_epoch, current_batch_index, batch_size, datas
     status_string = "E{:03.0f}|{:06.0f}/{:06.0f}({:04.1f}%)".format(current_epoch + 1, current_batch_index + batch_size, dataset_length, ratio)
 
     for k, l in losses.items():
-        status_string = "{}|{}={:5.4f}".format(status_string, k, l.last_value)
+        if l.weight == 0 and l.current_weight == 0:
+            continue
+        else:
+            status_string = "{}|{}={:5.4f}".format(status_string, k, l.last_value)
 
     # compute ETA
     eta = elapsed_time / (current_batch_index + batch_size) * (dataset_length - (current_batch_index + batch_size))

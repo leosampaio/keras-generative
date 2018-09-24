@@ -287,9 +287,12 @@ class BaseModel(metaclass=ABCMeta):
         for l in plot_organization:
             if isinstance(l, (tuple, list)):
                 submetrics, subiters, subnames, _ = self.get_loss_metrics_for_plot(l)
-                metrics.append(submetrics)
-                iters.append(subiters[0])
-                names.append(subnames)
+                if submetrics:
+                    metrics.append(submetrics)
+                    iters.append(subiters[0])
+                    names.append(subnames)
+            elif self.losses[l].weight == 0 and self.losses[l].current_weight == 0:
+                continue
             else:
                 metrics.append(self.losses[l].history)
                 iters.append(1)

@@ -11,6 +11,7 @@ from datasets import moving_mnist
 from datasets import lsun
 from datasets import cifar10
 from datasets import celeba
+from datasets import mixture
 
 import sklearn as sk
 
@@ -479,6 +480,12 @@ def load_dataset(dataset_name):
     elif dataset_name == 'celeba-128':
         datapath = celeba.load_data(image_size=128)
         dataset = LargeDataset(datapath, buffer_size=5000)
+    elif dataset_name == 'synthetic-8ring':
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
+        dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="ring", n=8, std=.05, r=1, density=5000)
+    elif dataset_name == 'synthetic-25grid':
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
+        dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="grid", n=25, std=.05, density=2500)
     elif dataset_name == 'mnist-anomaly':
         x, y, x_t, y_t, y_names = mnist.load_data()
         dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),
