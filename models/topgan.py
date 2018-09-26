@@ -137,11 +137,11 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                 self.gradnorm_trainer = self.build_grad_norm_trainer(
                     initial_losses=[ld['d_loss'], ld['d_triplet'],
                                     ld['ae_loss'], ld['d_triplet'],
-                                    ld['g_std'], ld['data_triplet'],
-                                    ld['began_d'], ld['g_loss'],
-                                    ld['g_triplet'], ld['ae_loss'],
-                                    ld['g_mean'], ld['g_std'],
-                                    ld['data_triplet'], ld['began_g']])
+                                    ld['g_std'], ld['data_triplet'], ld['began_d']])
+                # ld['began_d'], ld['g_loss'],
+                # ld['g_triplet'], ld['ae_loss'],
+                # ld['g_mean'], ld['g_std'],
+                # ld['data_triplet'], ld['began_g']])
             input_data_gn = [x_data, noise, np.expand_dims(x_permutation, axis=-1), z_latent_dis] + label_data + [np.ones(len(y)) for _ in range(len(label_data))]
             ld['gradnorm'], = self.gradnorm_trainer(input_data_gn + input_data_gn)
 
@@ -258,7 +258,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
         opt_g = Adam(lr=self.lr, beta_1=0.5)
         opt_ae = Adam(lr=self.lr)
-        opt_gradnorm = SGD(lr=self.lr)
+        opt_gradnorm = Adam(lr=0.01)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
                 "opt_ae": opt_ae,
@@ -285,8 +285,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         individual_grad_norms = []
         loss_ratios = []
         shared_layer_weights = self.encoder.trainable_weights
-        loss_tensors = self.dis_trainer.metrics_tensors + self.gen_trainer.metrics_tensors
-        loss_w_tensors = self.dis_trainer.loss_weights + self.gen_trainer.loss_weights
+        loss_tensors = self.dis_trainer.metrics_tensors  # + self.gen_trainer.metrics_tensors
+        loss_w_tensors = self.dis_trainer.loss_weights  # + self.gen_trainer.loss_weights
         for l, w, ini in zip(loss_tensors, loss_w_tensors, initial_losses):
             if w != 0:
                 grads = K.gradients(l, shared_layer_weights)
@@ -307,7 +307,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         # constant_mean = K.tf.Print(constant_mean, [k_grad_norms, k_loss_ratios], message="v: ")
         gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean))
         opt = self.optimizers["opt_gradnorm"]
-        trainable_weights = [l for l in self.dis_trainer.loss_weights if l != 0]
+        trainable_weights = [self.losses["ae_loss"].backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
         updates = opt.get_updates(trainable_weights, [], gradnorm_loss)
         return K.function(self.dis_trainer._feed_inputs +
                           self.dis_trainer._feed_targets +
