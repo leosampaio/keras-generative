@@ -300,3 +300,31 @@ def con_began_ae_lossfun(y_true, y_pred):
     half_x_reconstructed = y_pred[..., 5]
     con_ae_loss = K.mean(K.abs(half_x - half_x_reconstructed)) - K.mean(K.abs(half_x - con_half_x))
     return con_ae_loss
+
+def topgan_began_gen_lossfun(y_true, y_pred):
+    """
+    y_pred[:,0]: (Gx(z))
+    y_pred[:,1]: D(Gx(z))
+    y_pred[:,2]: D(x)
+    y_pred[:,3]: x
+    """
+    x_hat = y_pred[..., 0]
+    x_hat_reconstructed = y_pred[..., 1]
+    ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+    return ae_loss
+
+
+def topgan_began_dis_lossfun(y_true, y_pred):
+    """
+    y_pred[:,0]: (Gx(z))
+    y_pred[:,1]: D(Gx(z))
+    y_pred[:,2]: D(x)
+    y_pred[:,3]: x
+    """
+    x_hat = y_pred[..., 0]
+    x_hat_reconstructed = y_pred[..., 1]
+    x_real = y_pred[..., 3]
+    x_real_reconstructed = y_pred[..., 2]
+    fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+    real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
+    return real_ae_loss - fake_ae_loss

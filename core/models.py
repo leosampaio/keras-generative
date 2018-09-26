@@ -84,6 +84,7 @@ class BaseModel(metaclass=ABCMeta):
         # generic metric setup - end
 
         self.batchsize = kwargs.get('batchsize', 100)
+        self.use_gradnorm = kwargs.get('use_gradnorm', False)
 
     def get_experiment_id(self):
         id = "{}_zdim{}".format(self.name, self.z_dims)
@@ -172,7 +173,10 @@ class BaseModel(metaclass=ABCMeta):
                 if self.processed_images % self.notify_every < (self.processed_images - self.batchsize) % self.notify_every:
                     self.send_metrics_notification()
 
-                self.update_loss_weights()
+                if not self.use_gradnorm:
+                    self.update_loss_weights()
+                else:
+                    self.update_loss_weights_report()
 
             elapsed_time = time.time() - start_time
             print('\nTook: {}s\n'.format(elapsed_time))
@@ -189,6 +193,10 @@ class BaseModel(metaclass=ABCMeta):
                 l.reset_weight_from_last_significant_change()
             self.reset_optimizers()
             print("[TRAINING] Did reset optmizers.")
+
+    def update_loss_weights_report(self):
+        for l, loss in self.losses.items():
+            loss.update_weight_scalar()
 
     def reset_optimizers(self):
         if self.opt_states is None:

@@ -49,6 +49,7 @@ def main():
     parser.add_argument('--topgan-enforce-std-dev', action='store_true')
     parser.add_argument('--topgan-use-data-trilet-regularization', action='store_true')
     parser.add_argument('--use-began-loss', action='store_true')
+    parser.add_argument('--use-gradnorm', action='store_true')
 
     args = parser.parse_args()
 

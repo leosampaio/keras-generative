@@ -16,7 +16,7 @@ class Loss(object):
         self.backend = K.variable(0)
 
         allowed_weight_control_types = ['inc', 'dec', 'hold', 'halt', 'none',
-                                        'hold-inc', 'hold-dec']
+                                        'hold-inc', 'hold-dec', 'zero']
         if weight_control_type not in allowed_weight_control_types:
             raise ValueError("Weight control type must be one of {}".format(allowed_weight_control_types))
 
@@ -29,7 +29,11 @@ class Loss(object):
         attributes = control_string.split(':')
         if len(attributes) == 2:  # we have only weight and name
             _, weight = attributes
-            return cls(weight=float(weight))
+            w = float(weight)
+            if w == 0:
+                return cls(weight=float(weight), weight_control_type='zero')
+            else:
+                return cls(weight=float(weight))
         elif len(attributes) == 4:
             _, weight, lcontrol, pivot_epoch = attributes
             return cls(weight=float(weight),
@@ -39,6 +43,10 @@ class Loss(object):
             raise ValueError("Wrong format for loss control string")
 
     def update_weight_based_on_time(self, current_epoch):
+        if self.weight_control_type == 'zero':
+            self.backend = 0.
+            self.current_weight = 0.
+            return 0., 0.
         weighting_factor = np.min((1, (current_epoch) / self.pivot_control_epoch))
         new_weight = 0.0
         if self.weight_control_type == 'inc':
@@ -75,12 +83,17 @@ class Loss(object):
         return new_weight, np.abs(new_weight - self.weight_from_last_significant_change)
 
     def reset_weight_from_last_significant_change(self):
-        self.weight_from_last_significant_change = K.get_value(self.backend)
+        if self.weight_control_type != 'zero':
+            self.weight_from_last_significant_change = K.get_value(self.backend)
 
     def update_history(self, new_loss):
         self.last_value = new_loss
         self.history.append(new_loss)
         self.weight_history.append(self.current_weight)
+
+    def update_weight_scalar(self):
+        if self.weight_control_type != 'zero':
+            self.current_weight = K.get_value(self.backend)
 
     def get_mean_of_latest(self, n=1000):
         if len(self.history) > n:
