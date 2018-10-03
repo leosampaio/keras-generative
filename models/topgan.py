@@ -39,6 +39,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                  topgan_use_data_trilet_regularization=False,
                  use_began_loss=False,
                  use_gradnorm=False,
+                 gradnorm_alpha=0.5,
                  **kwargs):
 
         self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
@@ -66,6 +67,10 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         super().__init__(input_shape=input_shape, **kwargs)
 
+        if use_gradnorm:
+            self.losses['ae_loss'].clean_backend = self.losses['ae_loss'].backend
+            self.losses['ae_loss'].backend = K.relu(self.losses['ae_loss'].backend)
+
         self.embedding_size = embedding_dim
         self.triplet_margin = K.variable(triplet_margin)
         self.n_filters_factor = n_filters_factor
@@ -81,6 +86,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         self.use_began_loss = use_began_loss
         self.use_gradnorm = use_gradnorm
         self.gradnorm_trainer = None
+        self.gradnorm_alpha = gradnorm_alpha
 
         if self.use_magan_equilibrium:
             self.gamma = 1.
@@ -258,7 +264,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
         opt_g = Adam(lr=self.lr, beta_1=0.5)
         opt_ae = Adam(lr=self.lr)
-        opt_gradnorm = Adam(lr=0.01)
+        opt_gradnorm = Adam(lr=self.lr*10)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
                 "opt_ae": opt_ae,
@@ -297,7 +303,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         k_loss_ratios = K.stack(loss_ratios)
         # k_loss_ratios = K.tf.Print(k_loss_ratios,[k_loss_ratios], message="my constant:")
 
-        alpha = 1.
+        alpha = self.gradnorm_alpha
         mean_norm = K.mean(k_grad_norms)
         mean_loss_ratios = K.mean(k_loss_ratios)
         inverse_train_rate = k_loss_ratios / mean_loss_ratios
@@ -307,7 +313,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         # constant_mean = K.tf.Print(constant_mean, [k_grad_norms, k_loss_ratios], message="v: ")
         gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean))
         opt = self.optimizers["opt_gradnorm"]
-        trainable_weights = [self.losses["ae_loss"].backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
+        trainable_weights = [self.losses["ae_loss"].clean_backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
         updates = opt.get_updates(trainable_weights, [], gradnorm_loss)
         return K.function(self.dis_trainer._feed_inputs +
                           self.dis_trainer._feed_targets +
