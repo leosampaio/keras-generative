@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 from keras import backend as K
 
 
@@ -14,9 +15,10 @@ class Loss(object):
         self.weight_history = []
         self.current_weight = 0.
         self.backend = K.variable(0)
+        self.did_set_initial_weights = False
 
         allowed_weight_control_types = ['inc', 'dec', 'hold', 'halt', 'none',
-                                        'hold-inc', 'hold-dec', 'zero']
+                                        'hold-inc', 'hold-dec', 'zero', 'skip']
         if weight_control_type not in allowed_weight_control_types:
             raise ValueError("Weight control type must be one of {}".format(allowed_weight_control_types))
 
@@ -77,6 +79,13 @@ class Loss(object):
                 new_weight = self.weight
         elif self.weight_control_type == 'none':
             new_weight = self.weight
+        elif self.weight_control_type == 'skip':
+            if self.did_set_initial_weights:
+                self.current_weight = K.get_value(self.backend)
+                return self.current_weight, 0.
+            else:
+                self.did_set_initial_weights = True
+                new_weight = self.weight
 
         K.set_value(self.backend, new_weight)
         self.current_weight = new_weight
@@ -110,3 +119,33 @@ class Loss(object):
             return 0
         else:
             return np.std(self.history)
+
+    def save(self, filepath):
+        loss_dict = {
+            "last_value": self.last_value,
+            "history": self.history,
+            "weight": self.weight,
+            "weight_control_type": self.weight_control_type,
+            "pivot_control_epoch": self.pivot_control_epoch,
+            "weight_from_last_significant_change": self.weight_from_last_significant_change,
+            "weight_history": self.weight_history,
+            "current_weight": self.current_weight,
+            "did_set_initial_weights": self.did_set_initial_weights,
+        }
+        with open(filepath, 'wb') as f:
+            pickle.dump(loss_dict, f)
+
+    def load(self, filepath):
+        with open(filepath, "rb") as f:
+            loss_dict = pickle.load(f)
+            self.last_value = loss_dict["last_value"]
+            self.history = loss_dict["history"]
+            self.weight = loss_dict["weight"]
+            self.weight_control_type = loss_dict["weight_control_type"]
+            self.pivot_control_epoch = loss_dict["pivot_control_epoch"]
+            self.weight_from_last_significant_change = loss_dict["weight_from_last_significant_change"]
+            self.weight_history = loss_dict["weight_history"]
+            self.current_weight = loss_dict["current_weight"]
+            self.did_set_initial_weights = loss_dict["did_set_initial_weights"]
+            if self.backend:
+                K.set_value(self.backend, self.current_weight)

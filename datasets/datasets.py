@@ -77,12 +77,17 @@ class ConditionalDataset(Dataset):
         self.attr_names = None
 
     def get_random_fixed_batch(self, n=32):
-        y_categorical = np.argmax(self.attrs, axis=1)
-        _, x_data, _, y_data = sk.model_selection.train_test_split(self.images,
-                                                                   y_categorical,
-                                                                   stratify=y_categorical,
-                                                                   test_size=n,
-                                                                   random_state=14)
+        if len(self.attrs.shape) == 2:
+            y_categorical = np.argmax(self.attrs, axis=1)
+            _, x_data, _, y_data = sk.model_selection.train_test_split(self.images,
+                                                                       y_categorical,
+                                                                       stratify=y_categorical,
+                                                                       test_size=n,
+                                                                       random_state=14)
+        else:
+            perm = np.random.permutation(len(self.images))
+            x_data, y_data = self.images[perm[:n]], self.attrs[perm[:n]]
+
         return x_data, y_data
 
     def generator(self, batchsize):
@@ -486,6 +491,9 @@ def load_dataset(dataset_name):
     elif dataset_name == 'synthetic-25grid':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="grid", n=25, std=.05, density=2500)
+    elif dataset_name == 'synthetic-high-dim':
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
+        dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="high-dim", n=10, d=1200, std=1., density=5000)
     elif dataset_name == 'mnist-anomaly':
         x, y, x_t, y_t, y_names = mnist.load_data()
         dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),

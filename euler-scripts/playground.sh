@@ -1,4 +1,4 @@
-#PBS -N topgan
+#PBS -N topgan-2
 #PBS -l select=1:ngpus=1
 #PBS -l walltime=336:00:00
 
@@ -27,6 +27,8 @@ source env/bin/activate
 
 # python train.py --output /lustre/lribeiro/output --model topgan_ae_ebgan --dataset svhn --batchsize 64 --zdims 100 --checkpoint-every 5 --notify-every 2 --epoch 300 --g-triplet-weight 1.0 --d-triplet-weight 1.0 --ae-weight 0. --aux-clas-weight 0. -r $EXP_ID >> /lustre/lribeiro/logs/output2.log 2>&1 &
 
-python train.py --output /lustre/lribeiro/output --data-folder /lustre/lribeiro/data --model topgan-ae-began --dataset celeba-128 --batchsize 32 --embedding-dim 1024 --checkpoint-every 500. --epoch 10000 --controlled-losses ae_loss:1 g_triplet:1 d_triplet:1 g_loss:0 d_loss:0 --metrics dagostino-normality shapiro-normality histogram-normality reconstruction samples --notify-every 1. --z-dims 100 --input-noise 0.05 --triplet-margin 1 --lr 1e-4 --use-gradnorm -r testing210 >> /lustre/lribeiro/logs/testing210.log 2>&1 &
+# python train.py --output /lustre/lribeiro/output --data-folder /lustre/lribeiro/data --model topgan-ae-began --dataset celeba-128 --batchsize 32 --embedding-dim 1024 --checkpoint-every 500. --epoch 10000 --controlled-losses ae_loss:1 g_triplet:1 d_triplet:1 g_loss:0 d_loss:0 --metrics dagostino-normality shapiro-normality histogram-normality reconstruction samples --notify-every 1. --z-dims 100 --input-noise 0.05 --triplet-margin 1 --lr 1e-4 --use-gradnorm -r testing210 >> /lustre/lribeiro/logs/testing210.log 2>&1 &
+
+python train.py --output /lustre/lribeiro/output --data-folder /lustre/lribeiro/data --model topgan-ae-began --dataset celeba-128 --batchsize 32 --embedding-dim 4096 --checkpoint-every 500. --epoch 10000 --controlled-losses ae_loss:1 g_triplet:1 d_triplet:1 g_loss:0 d_loss:0 --metrics dagostino-normality shapiro-normality histogram-normality reconstruction samples --notify-every 1. --z-dims 100 --input-noise 0.05 --triplet-margin 1 --lr 1e-4 --use-gradnorm --gradnorm-alpha 0. -r testing216 >> /lustre/lribeiro/logs/testing216.log 2>&1 &
 
 wait

@@ -8,6 +8,7 @@ import glob
 import numpy as np
 import tensorflow as tf
 import keras.backend as K
+from sklearn.neighbors import NearestNeighbors
 
 from core.metrics import HistoryMetric, ProjectionMetric
 from metrics import inception_score
@@ -115,9 +116,54 @@ class SyntheticDatasetVis(ProjectionMetric):
 
     def compute(self, input_data):
         x_hat, x = input_data
-
         y = np.concatenate((np.zeros((len(x_hat),)), np.ones((len(x),))))
-        x_all = np.concatenate((x_hat, x), axis=0)
+        x_all = np.concatenate((x, x_hat), axis=0)
 
         return np.concatenate((x_all, np.expand_dims(y, axis=1)),
                               axis=1)
+
+
+class SyntheticDatasetModeCoverage(HistoryMetric):
+    name = 'mode-coverage'
+    input_type = 'generated_samples_and_possible_labels'
+
+    def compute(self, input_data):
+        x, distributions = input_data
+
+        means = [mu for mu, _ in distributions]
+
+        nn = NearestNeighbors(n_neighbors=1, metric='l2')
+        nn.fit(means)
+        distances, modes = nn.kneighbors(x, return_distance=True)
+
+        std = distributions[0][1][0]
+        if distributions.shape[2] > 2:
+            limit = 10 * std
+        else:
+            limit = 3 * std
+        covered_modes = np.unique(modes[np.where(distances < limit)[0]])
+
+        return len(covered_modes)
+
+
+class SyntheticDatasetHighQualitySamples(HistoryMetric):
+    name = 'high-quality-ratio'
+    input_type = 'generated_samples_and_possible_labels'
+
+    def compute(self, input_data):
+        x, distributions = input_data
+
+        means = [mu for mu, _ in distributions]
+
+        nn = NearestNeighbors(n_neighbors=1, metric='l2')
+        nn.fit(means)
+        distances, modes = nn.kneighbors(x, return_distance=True)
+
+        std = distributions[0][1][0]
+        if distributions.shape[2] > 2:
+            limit = 10 * std
+        else:
+            limit = 3 * std
+        high_quality_samples_ratio = np.mean(distances < limit)
+
+        return high_quality_samples_ratio

@@ -2,8 +2,9 @@ import os
 import time
 import numpy as np
 import h5py
-
 from abc import ABCMeta, abstractmethod
+
+from keras import Model
 
 from models.utils import (print_current_progress, plot_metrics,
                           remove_latest_similar_file_if_it_exists)
@@ -37,6 +38,7 @@ class BaseModel(metaclass=ABCMeta):
 
         self.current_epoch = 0
         self.current_fract_epoch = 0.
+        self.processed_images = 0
         self.run_id = kwargs.get('run_id', 0)
         self.name = "{}_r{}".format(self.name, self.run_id)
 
@@ -116,7 +118,6 @@ class BaseModel(metaclass=ABCMeta):
 
         # Create output directories if not exist
         self.dataset = dataset
-        self.processed_images = 0
         out_dir = os.path.join(self.output, self.experiment_id)
         if not os.path.isdir(out_dir):
             os.mkdir(out_dir)
@@ -169,14 +170,11 @@ class BaseModel(metaclass=ABCMeta):
 
                 # plot samples and losses and send notification if it's checkpoint time
                 if self.processed_images % self.checkpoint_every < (self.processed_images - self.batchsize) % self.checkpoint_every:
-                    self.save_model(self.wgt_out_dir, self.processed_images)
+                    self.save_model()
                 if self.processed_images % self.notify_every < (self.processed_images - self.batchsize) % self.notify_every:
                     self.send_metrics_notification()
 
-                if not self.use_gradnorm:
-                    self.update_loss_weights()
-                else:
-                    self.update_loss_weights_report()
+                self.update_loss_weights()
 
             elapsed_time = time.time() - start_time
             print('\nTook: {}s\n'.format(elapsed_time))
@@ -213,33 +211,44 @@ class BaseModel(metaclass=ABCMeta):
     def did_collapse(self, losses):
         return False
 
-    def save_model(self, out_dir, epoch):
-        folder = os.path.join(out_dir, 'epoch_%05d' % epoch)
+    def save_model(self):
+        folder = os.path.join(self.wgt_out_dir, 'pi_{}'.format(self.processed_images))
         if not os.path.isdir(folder):
             os.mkdir(folder)
 
-        for k, v in self.trainers.items():
-            filename = os.path.join(folder, '%s.hdf5' % (k))
-            v.save_weights(filename)
+        for name, model in self._contained_keras_models():
+            filename = os.path.join(folder, '{}.hdf5'.format(name))
+            model.save_weights(filename)
 
-    def store_to_save(self, name):
-        self.trainers[name] = getattr(self, name)
+        for l, loss in self.losses.items():
+            filename = os.path.join(folder, '{}.pickle'.format(l))
+            loss.save(filename)
+
+    def _contained_keras_models(self):
+        for a in dir(self):
+            if isinstance(getattr(self, a), Model):
+                yield a, getattr(self, a)
 
     def load_model(self, folder):
-        for k, v in self.trainers.items():
+        for name, model in self._contained_keras_models():
             try:
-                filename = os.path.join(folder, "{}.hdf5".format(k))
-                getattr(self, k).load_weights(filename)
+                filename = os.path.join(folder, "{}.hdf5".format(name))
+                model.load_weights(filename)
             except OSError as e:
-                print(e)
+                print(repr(e))
                 print("Couldn't load {}. Starting from scratch".format(filename))
             except ValueError as e:
-                print(e)
+                print(repr(e))
                 print("Couldn't load {}. Starting from scratch".format(filename))
 
         # load epoch number
-        epoch = int(folder.split('_')[-1].replace('/', ''))
-        self.last_epoch = epoch
+        processed_images = int(folder.split('_')[-1].replace('/', ''))
+        self.processed_images = processed_images
+        self.last_epoch = int(self.current_fract_epoch)+1
+
+        for l, loss in self.losses.items():
+            filename = os.path.join(folder, '{}.pickle'.format(l))
+            loss.load(filename)
 
     def did_train_over_an_epoch(self):
         pass

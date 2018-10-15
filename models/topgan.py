@@ -40,6 +40,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                  use_began_loss=False,
                  use_gradnorm=False,
                  gradnorm_alpha=0.5,
+                 distance_metric='l2',
+                 use_sigmoid_triplet=False,
                  **kwargs):
 
         self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
@@ -67,10 +69,6 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         super().__init__(input_shape=input_shape, **kwargs)
 
-        if use_gradnorm:
-            self.losses['ae_loss'].clean_backend = self.losses['ae_loss'].backend
-            self.losses['ae_loss'].backend = K.relu(self.losses['ae_loss'].backend)
-
         self.embedding_size = embedding_dim
         self.triplet_margin = K.variable(triplet_margin)
         self.n_filters_factor = n_filters_factor
@@ -87,6 +85,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         self.use_gradnorm = use_gradnorm
         self.gradnorm_trainer = None
         self.gradnorm_alpha = gradnorm_alpha
+        self.distance_metric = distance_metric
+        self.use_sigmoid_triplet = use_sigmoid_triplet
 
         if self.use_magan_equilibrium:
             self.gamma = 1.
@@ -169,6 +169,10 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         shuffled_x = Lambda(lambda x: K.gather(x, input_x_perm))(input_x)
         positive_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(anchor_embedding)
         _, _, x_rec_noise = self.f_D(x_noisy)
+
+        if self.use_sigmoid_triplet:
+            act = Activation('sigmoid')
+            anchor_embedding, positive_embedding, negative_embedding = act(anchor_embedding), act(positive_embedding), act(negative_embedding)
 
         fix_dim = Reshape((-1, 1))
 
@@ -257,8 +261,6 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         # store trainers
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, True)
-        self.store_to_save('gen_trainer')
-        self.store_to_save('dis_trainer')
 
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
@@ -270,22 +272,17 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                 "opt_ae": opt_ae,
                 "opt_gradnorm": opt_gradnorm}
 
-    def save_model(self, out_dir, epoch):
-        self.trainers['f_Gx'] = self.f_Gx
-        self.trainers['f_D'] = self.f_D
-        super().save_model(out_dir, epoch)
-
     def define_loss_functions(self):
         if self.use_began_equilibrium:
-            triplet_d = eq_triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, k=self.k_gd_ratio, simplified=self.use_simplified_triplet)
+            triplet_d = eq_triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, k=self.k_gd_ratio, simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
         else:
-            triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, simplified=self.use_simplified_triplet)
+            triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
         return (discriminator_lossfun, generator_lossfun,
                 triplet_d,
-                triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, inverted=True),
-                triplet_balance_creator(margin=self.triplet_margin, zdims=self.embedding_size, gamma=K.variable(self.gamma)),
-                triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size),
-                generic_triplet_lossfun_creator(margin=self.triplet_margin, inverted=True))
+                triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, inverted=True, distance_metric=self.distance_metric),
+                triplet_balance_creator(margin=self.triplet_margin, zdims=self.embedding_size, gamma=K.variable(self.gamma), distance_metric=self.distance_metric),
+                triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric),
+                generic_triplet_lossfun_creator(margin=self.triplet_margin, inverted=True, distance_metric=self.distance_metric))
 
     def build_grad_norm_trainer(self, initial_losses=1.):
         individual_grad_norms = []
@@ -295,25 +292,29 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         loss_w_tensors = self.dis_trainer.loss_weights  # + self.gen_trainer.loss_weights
         for l, w, ini in zip(loss_tensors, loss_w_tensors, initial_losses):
             if w != 0:
-                grads = K.gradients(l, shared_layer_weights)
-                grad_norm = K.tf.norm(K.concatenate([K.flatten(g) for g in grads]))
+                last_w = w
+                grads = K.tf.gradients(l, shared_layer_weights)
+                flattened_g = K.concatenate([K.flatten(g) for g in grads])
+                flattened_g = K.tf.where(K.tf.is_nan(flattened_g), K.tf.zeros_like(flattened_g), flattened_g)
+                grad_norm = K.tf.norm(flattened_g)
                 individual_grad_norms.append(grad_norm * w)
                 loss_ratios.append(l / ini)
         k_grad_norms = K.stack(individual_grad_norms)
         k_loss_ratios = K.stack(loss_ratios)
-        # k_loss_ratios = K.tf.Print(k_loss_ratios,[k_loss_ratios], message="my constant:")
+        # k_grad_norms = K.tf.Print(k_grad_norms, [grad_norm, l, last_w, l / ini], message="[grad, l, w, ratio]:")
 
         alpha = self.gradnorm_alpha
         mean_norm = K.mean(k_grad_norms)
         mean_loss_ratios = K.mean(k_loss_ratios)
         inverse_train_rate = k_loss_ratios / mean_loss_ratios
 
-        constant_mean = K.tf.stop_gradient((inverse_train_rate ** alpha) * mean_norm)
+        constant_mean = K.tf.stop_gradient(mean_norm)
         constant_mean = K.tf.stop_gradient(constant_mean)
         # constant_mean = K.tf.Print(constant_mean, [k_grad_norms, k_loss_ratios], message="v: ")
-        gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean))
+        nonnegativity = K.tf.nn.l2_loss(K.tf.nn.relu(K.tf.negative(self.losses["ae_loss"].backend))) # regularizer
+        gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean)) + 0.01*nonnegativity
         opt = self.optimizers["opt_gradnorm"]
-        trainable_weights = [self.losses["ae_loss"].clean_backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
+        trainable_weights = [self.losses["ae_loss"].backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
         updates = opt.get_updates(trainable_weights, [], gradnorm_loss)
         return K.function(self.dis_trainer._feed_inputs +
                           self.dis_trainer._feed_targets +
@@ -467,7 +468,17 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         images_from_set, _ = self.dataset.get_random_fixed_batch(n)
 
         self.save_precomputed_features('generated_and_real_samples', generated_images, Y=images_from_set)
-        return images_from_set, generated_images
+        return generated_images, images_from_set
+
+    def compute_generated_samples_and_possible_labels(self, n=10000):
+        np.random.seed(14)
+        samples = np.random.normal(size=(n, self.z_dims))
+        np.random.seed()
+
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
+
+        self.save_precomputed_features('generated_samples_and_possible_labels', generated_images, Y=self.dataset.attr_names)
+        return generated_images, self.dataset.attr_names
 
     def compute_triplet_distance_vectors(self, n=5000):
         np.random.seed(14)
@@ -940,14 +951,15 @@ class TOPGANwithAEmlpSynth(TOPGANwithAEfromBEGAN):
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
 
-        x = Dense(512)(inputs)
+        x = Dense(512, activity_regularizer=lambda x: K.maximum(0., 1e-6-K.std(x)))(inputs)
         x = Activation('relu')(x)
-        x = Dense(512)(x)
+        x = Dense(512, activity_regularizer=lambda x: K.maximum(0., 1e-6-K.std(x)))(x)
 
         x = Activation('relu')(x)
-        x = Dense(self.embedding_size, activity_regularizer=regularizers.l2(0.01))(x)
+        x = Dense(self.embedding_size)(x)
+        # x = Dense(self.embedding_size, kernel_regularizer=regularizers.l2(0.01))(x)
         # x = Dense(self.embedding_size)(x)
-        x = Activation('relu')(x)
+        # x = Activation('relu')(x)
 
         return Model(inputs, x, name='encoder')
 
@@ -966,6 +978,7 @@ class TOPGANwithAEmlpSynth(TOPGANwithAEfromBEGAN):
         embedding_input = Input(shape=(self.embedding_size,))
 
         x = Activation('relu')(embedding_input)
+        x = Dense(512)(x)
         x = Dense(1)(x)
 
         return Model(embedding_input, x, name='clas')

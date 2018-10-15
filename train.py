@@ -50,7 +50,9 @@ def main():
     parser.add_argument('--topgan-use-data-trilet-regularization', action='store_true')
     parser.add_argument('--use-began-loss', action='store_true')
     parser.add_argument('--use-gradnorm', action='store_true')
+    parser.add_argument('--use-sigmoid-triplet', action='store_true')
     parser.add_argument('--gradnorm-alpha', default=0.5, type=float)
+    parser.add_argument('--distance-metric', default='l2', type=str)
 
     args = parser.parse_args()
 
