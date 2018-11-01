@@ -15,9 +15,11 @@ from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
                            generator_lossfun, triplet_balance_creator,
                            eq_triplet_lossfun_creator,
                            triplet_std_creator, generic_triplet_lossfun_creator,
-                           topgan_began_dis_lossfun, topgan_began_gen_lossfun)
+                           topgan_began_dis_lossfun, topgan_began_gen_lossfun,
+                           ae_lossfun)
 
-from .layers import conv2d, deconv2d, LayerNorm
+from .layers import (conv2d, deconv2d, LayerNorm, squared_pairwise_distance,
+                     k_largest_indexes, print_tensor_shape)
 from .utils import (set_trainable, smooth_binary_labels)
 
 
@@ -42,6 +44,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                  gradnorm_alpha=0.5,
                  distance_metric='l2',
                  use_sigmoid_triplet=False,
+                 online_mining=None,
+                 online_mining_ratio=4,
                  **kwargs):
 
         self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
@@ -88,6 +92,9 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         self.distance_metric = distance_metric
         self.use_sigmoid_triplet = use_sigmoid_triplet
 
+        self.online_mining = online_mining
+        self.online_mining_ratio = online_mining_ratio
+
         if self.use_magan_equilibrium:
             self.gamma = 1.
 
@@ -97,29 +104,35 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
 
+        # get real latent variables distribution
+        z_latent_dis = np.random.normal(size=(self.batchsize, self.z_dims))
+
+        if self.mining_model:
+            triplets = self.mining_model.predict([x_data, z_latent_dis], batch_size=self.batchsize//self.online_mining_ratio)
+            x_permutation = triplets[:, 2]
+            x_data = x_data[triplets[:, 0]]
+            z_latent_dis = z_latent_dis[triplets[:, 1]]
+
         batchsize = len(x_data)
+        x_permutation = np.array(np.random.permutation(batchsize), dtype='int64')
 
         # perform label smoothing if applicable
         y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=False)
         y = np.stack((y_neg, y_pos), axis=1)
-
-        # get real latent variables distribution
-        z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
 
         if self.input_noise > 1e-5:
             noise = np.random.normal(scale=self.input_noise, size=x_data.shape)
         else:
             noise = np.zeros(x_data.shape)
 
-        x_permutation = np.array(np.random.permutation(batchsize), dtype='int64')
         dummy_y = np.expand_dims(y, axis=-1)
         input_data = [x_data, noise, x_permutation, z_latent_dis]
-        label_data = [y, y, x_data, y, y, dummy_y, dummy_y]
+        label_data = [y, y, dummy_y, y, y, dummy_y, dummy_y]
 
         # train both networks
         ld = {}  # loss dictionary
-        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'], _, _, _, ld['began_d'] = self.dis_trainer.train_on_batch(input_data, label_data)
         _, ld['g_loss'], ld['g_triplet'], _, ld['g_mean'], ld['g_std'], ld['data_triplet'], ld['began_g'] = self.gen_trainer.train_on_batch(input_data, label_data)
+        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'], _, _, _, ld['began_d'] = self.dis_trainer.train_on_batch(input_data, label_data)
         if self.use_alignment_layer:
             _, _, _, _, balance, _ = self.alignment_layer_trainer.train_on_batch(input_data, label_data)
         if self.use_began_equilibrium:
@@ -153,6 +166,25 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         return ld
 
+    def build_online_mining_model(self):
+        input_x = Input(shape=self.input_shape)
+        input_z = Input(shape=(self.z_dims,))
+
+        x_hat = self.f_Gx(input_z)
+        negative_embedding, _, _ = self.f_D(x_hat)
+        anchor_embedding, _, _ = self.f_D(input_x)
+
+        # we first mine negative values
+        d_n = squared_pairwise_distance()([anchor_embedding, negative_embedding])
+        k_d_n = Lambda(lambda x: k_largest_indexes(k=self.batchsize // self.online_mining_ratio)(-x))(d_n)
+
+        # then, for each positive pair, we mine its positive counterpart
+        d_p = squared_pairwise_distance()([anchor_embedding, anchor_embedding])
+        k_d_p = k_largest_indexes(k=1, idx_dims=1)(d_p)
+        positive_k_idx = Lambda(lambda x: K.gather(x, k_d_n[:, 0]))(k_d_p)
+
+        return Model([input_x, input_z], Concatenate(axis=-1, name="aligned_triplet")([k_d_n, positive_k_idx]), name='mined_triplets')
+
     def build_trainer(self):
         input_x = Input(shape=self.input_shape)
         input_noise = Input(shape=self.input_shape)
@@ -185,17 +217,19 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             [fix_dim(input_x), fix_dim(shuffled_x), fix_dim(x_hat)])
         concatenated_began_recons = Concatenate(axis=-1, name="began_ae")(
             [fix_dim(x_hat), fix_dim(x_hat_rec), fix_dim(x_rec), fix_dim(input_x)])
+        concatenated_ae = Concatenate(axis=-1, name="ae")(
+            [fix_dim(input_x), fix_dim(x_rec_noise)])
 
         if self.use_alignment_layer:
             aligned_negative_embedding = self.alignment_layer(negative_embedding)
             concatenated_aligned_triplet = Concatenate(axis=-1, name="aligned_triplet")(
                 [anchor_embedding, positive_embedding, aligned_negative_embedding])
-            output = [concatenated_dis, concatenated_triplet, x_rec_noise,
+            output = [concatenated_dis, concatenated_triplet, concatenated_ae,
                       concatenated_aligned_triplet,
                       concatenated_aligned_triplet, concatenated_data_triplet,
                       concatenated_began_recons]
         else:
-            output = [concatenated_dis, concatenated_triplet, x_rec_noise,
+            output = [concatenated_dis, concatenated_triplet, concatenated_ae,
                       concatenated_triplet, concatenated_triplet,
                       concatenated_data_triplet, concatenated_began_recons]
         return Model(input, output, name='topgan')
@@ -229,6 +263,9 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             ae_loss = self.losses['ae_loss'].backend
             began_loss_w = 0.
 
+        if self.online_mining:
+            self.mining_model = self.build_online_mining_model()
+
         if self.use_alignment_layer:
             self.alignment_layer.summary()
             self.alignment_layer_trainer = self.build_trainer()
@@ -237,7 +274,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             set_trainable(self.alignment_layer, True)
             self.alignment_layer_trainer.compile(
                 optimizer=self.optimizers["opt_ae"],
-                loss=[loss_d, triplet_d_loss, 'mse', triplet_g_loss, t_std, x_triplet, topgan_began_dis_lossfun],
+                loss=[loss_d, triplet_d_loss, ae_lossfun, triplet_g_loss, t_std, x_triplet, topgan_began_dis_lossfun],
                 loss_weights=[0, 0, 0, 1.])
             loss_weights = [self.losses['d_loss'].backend, 0, ae_loss, self.losses['d_triplet'].backend, std_dev_weight, 0., began_loss_w]
             set_trainable(self.alignment_layer, False)
@@ -247,7 +284,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
-                                 loss=[loss_d, triplet_d_loss, 'mse', triplet_d_loss, t_std, x_triplet, topgan_began_dis_lossfun],
+                                 loss=[loss_d, triplet_d_loss, ae_lossfun, triplet_d_loss, t_std, x_triplet, topgan_began_dis_lossfun],
                                  loss_weights=loss_weights)
 
         # build generators
@@ -255,7 +292,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
-                                 loss=[loss_g, triplet_g_loss, 'mse', t_mean, t_std, x_triplet, topgan_began_gen_lossfun],
+                                 loss=[loss_g, triplet_g_loss, ae_lossfun, t_mean, t_std, x_triplet, topgan_began_gen_lossfun],
                                  loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, 0., 0., 0., x_triplet_weight, began_loss_w])
 
         # store trainers
@@ -266,7 +303,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
         opt_g = Adam(lr=self.lr, beta_1=0.5)
         opt_ae = Adam(lr=self.lr)
-        opt_gradnorm = Adam(lr=self.lr*10)
+        opt_gradnorm = Adam(lr=self.lr, beta_1=0.5)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
                 "opt_ae": opt_ae,
@@ -274,7 +311,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
     def define_loss_functions(self):
         if self.use_began_equilibrium:
-            triplet_d = eq_triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, k=self.k_gd_ratio, simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
+            triplet_d = eq_triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, k=self.k_gd_ratio,
+                                                   simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
         else:
             triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
         return (discriminator_lossfun, generator_lossfun,
@@ -311,8 +349,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         constant_mean = K.tf.stop_gradient(mean_norm)
         constant_mean = K.tf.stop_gradient(constant_mean)
         # constant_mean = K.tf.Print(constant_mean, [k_grad_norms, k_loss_ratios], message="v: ")
-        nonnegativity = K.tf.nn.l2_loss(K.tf.nn.relu(K.tf.negative(self.losses["ae_loss"].backend))) # regularizer
-        gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean)) + 0.01*nonnegativity
+        nonnegativity = K.tf.nn.l2_loss(K.tf.nn.relu(K.tf.negative(self.losses["ae_loss"].backend-0.1)))  # regularizer
+        gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean)) + 0.1 * nonnegativity
         opt = self.optimizers["opt_gradnorm"]
         trainable_weights = [self.losses["ae_loss"].backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
         updates = opt.get_updates(trainable_weights, [], gradnorm_loss)
@@ -705,10 +743,16 @@ class TOPGANwithAESmall2(TOPGANwithAEfromBEGAN):
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
 
-        x = conv2d(32, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+        if self.input_shape[0] == 32:
+            x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+        elif self.input_shape[0] == 64:
+            x = conv2d(64, (4, 4), strides=(4, 4), bnorm=False, activation='relu')(inputs)
+        elif self.input_shape[0] == 128:
+            x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+            x = conv2d(64, (4, 4), strides=(4, 4), bnorm=False, activation='relu')(x)
+        x = conv2d(8, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(x)
         x = Flatten()(x)
         x = Dense(self.embedding_size)(x)
-        x = Activation('linear')(x)
 
         return Model(inputs, x)
 
@@ -727,7 +771,7 @@ class TOPGANwithAESmall2(TOPGANwithAEfromBEGAN):
             x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
         x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
         x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
-        x = conv2d(orig_channels, (3, 3), strides=(1, 1), bnorm=False, activation='sigmoid', padding='same')(x)
+        x = conv2d(orig_channels, (3, 3), strides=(1, 1), bnorm=False, activation=None, padding='same')(x)
 
         return Model(z_input, x)
 
@@ -735,8 +779,6 @@ class TOPGANwithAESmall2(TOPGANwithAEfromBEGAN):
         embedding_input = Input(shape=(self.embedding_size,))
 
         x = Activation('relu')(embedding_input)
-        x = Dense(64)(x)
-        x = Activation('relu')(x)
         x = Dense(1)(x)
         x = Activation('sigmoid')(x)
 
@@ -774,10 +816,9 @@ class TOPGANwithAESmall3(TOPGANwithAEfromBEGAN):
             x = conv2d(64, (4, 4), strides=(4, 4), bnorm=False, activation='relu')(inputs)
         elif self.input_shape[0] == 128:
             x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
-            x = conv2d(64, (4, 4), strides=(4, 4), bnorm=False, activation='relu')(inputs)
-        x = Flatten()(x)
+            x = conv2d(64, (4, 4), strides=(4, 4), bnorm=False, activation='relu')(x)
+        x = conv2d(8, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(x)
         x = Dense(self.embedding_size)(x)
-        x = Activation('linear')(x)
 
         return Model(inputs, x)
 
@@ -796,7 +837,7 @@ class TOPGANwithAESmall3(TOPGANwithAEfromBEGAN):
             x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
         x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
         x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
-        x = conv2d(orig_channels, (3, 3), strides=(1, 1), bnorm=False, activation='sigmoid', padding='same')(x)
+        x = conv2d(orig_channels, (3, 3), strides=(1, 1), bnorm=False, activation=None, padding='same')(x)
 
         return Model(z_input, x)
 
@@ -804,8 +845,6 @@ class TOPGANwithAESmall3(TOPGANwithAEfromBEGAN):
         embedding_input = Input(shape=(self.embedding_size,))
 
         x = Activation('relu')(embedding_input)
-        x = Dense(64)(x)
-        x = Activation('relu')(x)
         x = Dense(1)(x)
         x = Activation('sigmoid')(x)
 
@@ -951,9 +990,9 @@ class TOPGANwithAEmlpSynth(TOPGANwithAEfromBEGAN):
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
 
-        x = Dense(512, activity_regularizer=lambda x: K.maximum(0., 1e-6-K.std(x)))(inputs)
+        x = Dense(512, activity_regularizer=lambda x: K.maximum(0., 1e-6 - K.std(x)))(inputs)
         x = Activation('relu')(x)
-        x = Dense(512, activity_regularizer=lambda x: K.maximum(0., 1e-6-K.std(x)))(x)
+        x = Dense(512, activity_regularizer=lambda x: K.maximum(0., 1e-6 - K.std(x)))(x)
 
         x = Activation('relu')(x)
         x = Dense(self.embedding_size)(x)
@@ -993,3 +1032,161 @@ class TOPGANwithAEmlpSynth(TOPGANwithAEfromBEGAN):
         x = Dense(np.prod(self.input_shape))(x)
 
         return Model(z_input, x, name='G')
+
+
+class TOPGANwithAEmlpSynthNoReg(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-mlp-synth-noreg'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = Dense(512)(inputs)
+        x = Activation('relu')(x)
+        x = Dense(512)(x)
+
+        x = Activation('relu')(x)
+        x = Dense(self.embedding_size)(x)
+
+        return Model(inputs, x, name='encoder')
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+
+        x = Dense(512)(z_input)
+        x = Activation('relu')(x)
+        x = Dense(512)(x)
+        x = Activation('relu')(x)
+        x = Dense(np.prod(self.input_shape))(x)
+
+        return Model(z_input, x, name='decoder')
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(self.embedding_size,))
+
+        x = Activation('relu')(embedding_input)
+        x = Dense(512)(x)
+        x = Dense(1)(x)
+
+        return Model(embedding_input, x, name='clas')
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+
+        x = Dense(512)(z_input)
+        x = Activation('relu')(x)
+        x = Dense(512)(x)
+        x = Activation('relu')(x)
+        x = Dense(np.prod(self.input_shape))(x)
+
+        return Model(z_input, x, name='G')
+
+
+class TOPGANwithAEmlpSynthNoRegVeegan(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-mlp-synth-veegan'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = Dense(128)(inputs)
+        x = Activation('relu')(x)
+        x = Dense(128)(x)
+        x = Activation('relu')(x)
+        x = Dense(self.embedding_size)(x)
+
+        return Model(inputs, x, name='encoder')
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+
+        x = Dense(128)(z_input)
+        x = Activation('relu')(x)
+        x = Dense(128)(x)
+        x = Activation('relu')(x)
+        x = Dense(np.prod(self.input_shape))(x)
+
+        return Model(z_input, x, name='decoder')
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(self.embedding_size,))
+
+        x = Activation('relu')(embedding_input)
+        x = Dense(128)(x)
+        x = Dense(1)(x)
+
+        return Model(embedding_input, x, name='clas')
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+
+        x = Dense(128)(z_input)
+        x = Activation('relu')(x)
+        x = Dense(128)(x)
+        x = Activation('relu')(x)
+        x = Dense(np.prod(self.input_shape))(x)
+
+        return Model(z_input, x, name='G')
+
+
+def regfun(x):
+    tmp = K.maximum(0., 1e-6 - K.std(K.batch_flatten(x), axis=0))
+    # tmp = K.tf.Print(tmp, [tmp, K.shape(tmp)], "")
+    return K.mean(tmp)
+
+
+class TOPGANwithAEfromDCGANRegularized(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-dcgan-reg'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = conv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(inputs)
+        x = conv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(x)
+        x = conv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(x)
+        x = conv2d(self.n_filters_factor * 8, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', reg=regfun)(x)
+
+        x = Flatten()(x)
+        x = Dense(self.embedding_size)(x)
+
+        return Model(inputs, x)
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**4
+
+        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
+        x = Reshape((w, w, self.n_filters_factor * 8))(x)
+        x = BatchNormalization()(x)
+        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+
+        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(self.embedding_size,))
+
+        x = Dense(1)(embedding_input)
+        x = Activation('sigmoid')(x)
+
+        return Model(embedding_input, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**4
+
+        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
+        x = Reshape((w, w, self.n_filters_factor * 8))(x)
+        x = BatchNormalization()(x)
+        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+
+        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)

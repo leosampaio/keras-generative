@@ -183,7 +183,7 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
 
         elif types[ii] == 'scatter':
             ax = plt.subplot(current_cell)
-            ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
+            # ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
             cmap = cm.tab10
             category_labels = metric[..., 2]
             norm = colors.Normalize(vmin=np.min(category_labels), vmax=np.max(category_labels))
@@ -192,9 +192,10 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
             unique_labels = list(set(category_labels))
             lines = ax.scatter(metric[..., 0], metric[..., 1],
                                color=mapped_colors,
-                               label=unique_labels)
-            patch = mpatches.Patch(color='silver', label=metric_names[ii])
-            ax.legend(handles=[patch], prop={'size': 20})
+                               label=unique_labels, alpha=0.2, marker='.',
+                               edgecolors='none')
+            # patch = mpatches.Patch(color='silver', label=metric_names[ii])
+            # ax.legend(handles=[patch], prop={'size': 20})
 
         elif types[ii] == 'image-grid':
             imgs = metric
@@ -214,8 +215,8 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
             ax = plt.subplot(current_cell)
             ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
             lines = ax.hist(metric, bins=100)
-            patch = mpatches.Patch(color='silver', label=metric_names[ii])
-            ax.legend(handles=[patch], prop={'size': 20})
+            # patch = mpatches.Patch(color='silver', label=metric_names[ii])
+            # ax.legend(handles=[patch], prop={'size': 20})
 
         if ax is not None:
             if x_label is not None and not isinstance(x_label, (list, tuple)):

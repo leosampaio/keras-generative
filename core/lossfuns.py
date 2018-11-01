@@ -22,7 +22,7 @@ def triplet_distances(a, p, n, metric='l2'):
     return d_p, d_n
 
 
-def triplet_lossfun_creator(margin=1., zdims=256, inverted=False, simplified=False, distance_metric='l2'):
+def triplet_lossfun_creator(margin=1., zdims=256, inverted=False, simplified=False, distance_metric='l2', type='normal'):
     def triplet_lossfun(_, y_pred):
 
         m = K.ones((K.shape(y_pred)[0],)) * margin
@@ -102,11 +102,11 @@ def discriminator_lossfun(y_true, y_pred):
     """
     p = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
     q = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:, 0]
-    q_true = y_true[:, 1]
+    # p_true = y_true[:, 0] # 0
+    # q_true = y_true[:, 1] # 1
 
-    q_error = -K.mean(K.log(K.abs(q_true - q)))
-    p_error = -K.mean(K.log(K.abs(p - p_true)))
+    q_error = -K.mean(K.log(K.abs(0 - q)))
+    p_error = -K.mean(K.log(K.abs(p - 1)))
 
     return q_error + p_error
 
@@ -118,11 +118,11 @@ def generator_lossfun(y_true, y_pred):
     """
     p = K.clip(y_pred[:, 0], K.epsilon(), 1.0 - K.epsilon())
     q = K.clip(y_pred[:, 1], K.epsilon(), 1.0 - K.epsilon())
-    p_true = y_true[:, 0]
-    q_true = y_true[:, 1]
+    # p_true = y_true[:, 0]
+    # q_true = y_true[:, 1]
 
-    q_error = -K.mean(K.log(K.abs(p_true - q)))
-    p_error = -K.mean(K.log(K.abs(p - q_true)))
+    q_error = -K.mean(K.log(K.abs(1 - q)))
+    p_error = -K.mean(K.log(K.abs(p - 0)))
 
     return q_error + p_error
 
@@ -192,6 +192,16 @@ def began_gen_lossfun(y_true, y_pred):
     x_hat = y_pred[..., 0]
     x_hat_reconstructed = y_pred[..., 1]
     ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+    return ae_loss
+
+def ae_lossfun(y_true, y_pred):
+    """
+    y_pred[:,0]: x
+    y_pred[:,1]: D(x)
+    """
+    x = y_pred[..., 0]
+    x_reconstructed = y_pred[..., 1]
+    ae_loss = K.mean(K.square(x - x_reconstructed))
     return ae_loss
 
 
@@ -341,6 +351,9 @@ def topgan_began_dis_lossfun(y_true, y_pred):
     x_hat_reconstructed = y_pred[..., 1]
     x_real = y_pred[..., 3]
     x_real_reconstructed = y_pred[..., 2]
+    # y_pred = K.tf.Print(y_pred, [y_pred.shape])
+    # a = K.tf.Print(a, [a.shape])
+    # p = K.tf.Print(p, [p.shape])
     fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
     real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
     return real_ae_loss - fake_ae_loss

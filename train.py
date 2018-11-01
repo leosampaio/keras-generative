@@ -51,8 +51,11 @@ def main():
     parser.add_argument('--use-began-loss', action='store_true')
     parser.add_argument('--use-gradnorm', action='store_true')
     parser.add_argument('--use-sigmoid-triplet', action='store_true')
+    parser.add_argument('--online-mining', default=None, type=str)
+    parser.add_argument('--online-mining-ratio', default=4, type=int)
     parser.add_argument('--gradnorm-alpha', default=0.5, type=float)
     parser.add_argument('--distance-metric', default='l2', type=str)
+    parser.add_argument('--slack-channel', type=str, default="random")
 
     args = parser.parse_args()
 

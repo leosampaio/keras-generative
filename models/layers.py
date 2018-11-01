@@ -63,7 +63,8 @@ def BasicConvLayer(filters,
                    dropout=0.0,
                    activation='leaky_relu',
                    leaky_relu_slope=0.1,
-                   residual=None, k_constraint=None):
+                   residual=None, k_constraint=None,
+                   reg=None):
 
     kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
     bias_init = keras.initializers.Zeros()
@@ -73,7 +74,8 @@ def BasicConvLayer(filters,
                   kernel_initializer=kernel_init,
                   bias_initializer=bias_init,
                   padding=padding,
-                  kernel_constraint=k_constraint)
+                  kernel_constraint=k_constraint,
+                  activity_regularizer=reg)
     bn = BatchNormalization()
     ln = LayerNorm()
 
@@ -244,25 +246,55 @@ def ResDeconvLayer(filters,
     return fun
 
 
+def squared_pairwise_distance():
+    def _squared_pairwise_distance(input):
+        a, b = input
+        expanded_a = K.tf.expand_dims(a, 1)
+        expanded_b = K.tf.expand_dims(b, 0)
+        distances = K.tf.reduce_sum(K.tf.squared_difference(expanded_a, expanded_b), 2)
+        return distances
+    return Lambda(_squared_pairwise_distance)
+
+
+def k_largest_indexes(k, idx_dims=2):
+    def _k_largest_indexes(x):
+        if idx_dims > 1:
+            _, idx = K.tf.nn.top_k(K.flatten(x), k=k, sorted=True)
+            multi_dimensional_idx = K.tf.stack([idx // K.shape(x)[1], idx % K.shape(x)[1]], axis=1)
+            # multi_dimensional_idx = K.tf.Print(multi_dimensional_idx, [multi_dimensional_idx.shape,])
+            return multi_dimensional_idx
+        else:
+            _, idx = K.tf.nn.top_k(x, k=k, sorted=True)
+            return idx
+
+    return Lambda(_k_largest_indexes)
+
+def print_tensor_shape(input):
+    def _tensor_shape(input):
+        return K.tf.Print(input, [input.shape])
+    return Lambda(_tensor_shape)(input)
+
+
+
 class VAELossLayer(Layer):
-    __name__ = 'vae_loss_layer'
+    __name__='vae_loss_layer'
 
     def __init__(self, **kwargs):
-        self.is_placeholder = True
+        self.is_placeholder=True
         super(VAELossLayer, self).__init__(**kwargs)
 
     def lossfun(self, x_true, x_pred, z_avg, z_log_var):
-        rec_loss = K.mean(K.square(x_true - x_pred))
-        kl_loss = K.mean(-0.5 * K.sum(1.0 + z_log_var - K.square(z_avg) - K.exp(z_log_var), axis=-1))
+        rec_loss=K.mean(K.square(x_true - x_pred))
+        kl_loss=K.mean(-0.5 * K.sum(1.0 + z_log_var - K.square(z_avg) - K.exp(z_log_var), axis=-1))
         return rec_loss + kl_loss
 
     def call(self, inputs):
-        x_true = inputs[0]
-        x_pred = inputs[1]
-        z_avg = inputs[2]
-        z_log_var = inputs[3]
-        loss = self.lossfun(x_true, x_pred, z_avg, z_log_var)
-        self.add_loss(loss, inputs=inputs)
+        x_true=inputs[0]
+        x_pred=inputs[1]
+        z_avg=inputs[2]
+        z_log_var=inputs[3]
+        loss=self.lossfun(x_true, x_pred, z_avg, z_log_var)
+        self.add_loss(loss, inputs = inputs)
 
         return x_true
 
@@ -273,17 +305,17 @@ class GramMatrixLayer(Layer):
         super().__init__(**kwargs)
 
     def call(self, features):
-        x = K.batch_flatten(features)
-        x = K.expand_dims(x, axis=-1)
-        gram = K.batch_dot(x, K.permute_dimensions(x, (0, 2, 1)))
+        x=K.batch_flatten(features)
+        x=K.expand_dims(x, axis = -1)
+        gram=K.batch_dot(x, K.permute_dimensions(x, (0, 2, 1)))
         return gram
 
     def compute_output_shape(self, input_shape):
-        flattened_shape = input_shape[1] * input_shape[2] * input_shape[3]
+        flattened_shape=input_shape[1] * input_shape[2] * input_shape[3]
         return (input_shape[0], flattened_shape, flattened_shape)
 
 
-def pi_regularizer_creator(weight=1.0):
+def pi_regularizer_creator(weight = 1.0):
     """
     # input shapes
         2D tensor with shape (m, n)
@@ -291,15 +323,15 @@ def pi_regularizer_creator(weight=1.0):
         l*sum_k(sum_l(pi_kl-1)^2 + sum_l(pi_lk-1)^2)
     """
     def pi_regularizer(perm_matrix):
-        l = K.constant(weight)
-        sum_over_axis_0 = K.sum(K.sum(perm_matrix - 1, axis=0), axis=1)
-        sum_over_axis_1 = K.sum(K.sum(perm_matrix - 1, axis=1), axis=0)
+        l=K.constant(weight)
+        sum_over_axis_0=K.sum(K.sum(perm_matrix - 1, axis=0), axis = 1)
+        sum_over_axis_1=K.sum(K.sum(perm_matrix - 1, axis=1), axis = 0)
         return l * (sum_over_axis_0 + sum_over_axis_1)
 
 
 class PermutationMatrixPiLayer(Layer):
     """
-    Implements a Kernelized Sorting [1] Permutation Matrix Pi, sliced by 
+    Implements a Kernelized Sorting [1] Permutation Matrix Pi, sliced by
     indexes of the current batch (which must be provided as input)
 
     [1] N. Quadrianto, L. Song, and A. J. Smola. Kernelized sorting
@@ -330,20 +362,20 @@ class PermutationMatrixPiLayer(Layer):
                 restriction_weight: lambda in formulation, how strongly we want
                     to enforce the PI.1n = 1n.PI^t = 1n restriction
         """
-        self.n = n
-        self.m = m
-        self.restriction_weight = restriction_weight
+        self.n=n
+        self.m=m
+        self.restriction_weight=restriction_weight
         super().__init__(**kwargs)
 
     def build(self, input_shape):
-        self.pi = self.add_weight(name='pi',
-                                  shape=(self.n, self.m),
-                                  initializer='glorot_uniform',
-                                  regularizer=pi_regularizer_creator(weight=self.restriction_weight),
-                                  trainable=True)
+        self.pi=self.add_weight(name = 'pi',
+                                  shape = (self.n, self.m),
+                                  initializer = 'glorot_uniform',
+                                  regularizer = pi_regularizer_creator(weight=self.restriction_weight),
+                                  trainable = True)
         super().build(input_shape)
 
-    def call(self, inputs, mask=None):
+    def call(self, inputs, mask = None):
         if type(inputs) is not list or len(inputs) <= 1:
             raise Exception('Permutation matrix must be called on a list of tensors '
                             '(4). Got: ' + str(inputs))
