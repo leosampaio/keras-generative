@@ -213,7 +213,6 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
 
         elif types[ii] == 'hist':
             ax = plt.subplot(current_cell)
-            ax.yaxis.set_major_formatter(FormatStrFormatter('%.4f'))
             lines = ax.hist(metric, bins=100)
             # patch = mpatches.Patch(color='silver', label=metric_names[ii])
             # ax.legend(handles=[patch], prop={'size': 20})

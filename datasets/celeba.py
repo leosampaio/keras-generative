@@ -40,8 +40,11 @@ def download_celeba():
         print('Done!')
 
 
-def preprocess_image(x, crop_size=IMG_SIZE):
-    smallest_size = np.min((x.shape[0], x.shape[1]))
+def preprocess_image(x, crop_size=IMG_SIZE, center_crop=False):
+    if center_crop:
+        smallest_size = 128
+    else:
+        smallest_size = np.min((x.shape[0], x.shape[1]))
     crop_y = (x.shape[0] - smallest_size) // 2
     crop_x = (x.shape[1] - smallest_size) // 2
     x = x[crop_y:(x.shape[0] - crop_y), crop_x:(x.shape[1] - crop_x), :]
@@ -49,7 +52,7 @@ def preprocess_image(x, crop_size=IMG_SIZE):
     return sp.misc.imresize(x, (crop_size, crop_size)) / 255.
 
 
-def load_data(image_size=64):
+def load_data(image_size=64, center_crop=False):
     """
     Load and return dataset as tuple (data, label, label_strings)
     """
@@ -65,7 +68,8 @@ def load_data(image_size=64):
             zip_ref.extractall(out_unzipped_folder)
             print("Done!")
 
-    h5_f_filepath = h5_filepath.format(image_size)
+    crop_type = "" if not center_crop else "center"
+    h5_f_filepath = h5_filepath.format("{}{}".format(image_size, crop_type))
     if not os.path.exists(h5_f_filepath):
         image_paths = glob.glob("{}/img_align_celeba/*.jpg".format(out_unzipped_folder))
         data_lenght = len(image_paths)
@@ -73,7 +77,7 @@ def load_data(image_size=64):
         with h5py.File(h5_f_filepath, mode='w') as hdf5_file:
             hdf5_file.create_dataset("data", (data_lenght, image_size, image_size, 3), np.float32)
             for img_path in image_paths:
-                img = preprocess_image(imageio.imread(img_path), crop_size=image_size)
+                img = preprocess_image(imageio.imread(img_path), crop_size=image_size, center_crop=center_crop)
                 hdf5_file['data'][count, ...] = img
                 count += 1
                 print('Preprocessed', count, 'images', end='\r')

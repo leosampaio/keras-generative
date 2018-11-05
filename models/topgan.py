@@ -45,7 +45,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                  distance_metric='l2',
                  use_sigmoid_triplet=False,
                  online_mining=None,
-                 online_mining_ratio=4,
+                 online_mining_ratio=1,
                  **kwargs):
 
         self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
@@ -106,15 +106,19 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         # get real latent variables distribution
         z_latent_dis = np.random.normal(size=(self.batchsize, self.z_dims))
+        x_permutation = np.array(np.random.permutation(self.batchsize), dtype='int64')
 
         if self.mining_model:
-            triplets = self.mining_model.predict([x_data, z_latent_dis], batch_size=self.batchsize//self.online_mining_ratio)
-            x_permutation = triplets[:, 2]
+            triplets = self.mining_model.predict([x_data, z_latent_dis], batch_size=self.batchsize // self.online_mining_ratio)
             x_data = x_data[triplets[:, 0]]
             z_latent_dis = z_latent_dis[triplets[:, 1]]
 
+            if self.online_mining == 'pairs-negative' or self.online_mining == 'negative':
+                x_permutation = np.array(np.random.permutation(len(x_data)), dtype='int64')
+            elif self.online_mining == 'pairs-both' or self.online_mining == 'both':
+                x_permutation = triplets[:, 2]
+
         batchsize = len(x_data)
-        x_permutation = np.array(np.random.permutation(batchsize), dtype='int64')
 
         # perform label smoothing if applicable
         y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=False)
@@ -174,16 +178,29 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         negative_embedding, _, _ = self.f_D(x_hat)
         anchor_embedding, _, _ = self.f_D(input_x)
 
-        # we first mine negative values
+        n = self.batchsize // self.online_mining_ratio
         d_n = squared_pairwise_distance()([anchor_embedding, negative_embedding])
-        k_d_n = Lambda(lambda x: k_largest_indexes(k=self.batchsize // self.online_mining_ratio)(-x))(d_n)
-
-        # then, for each positive pair, we mine its positive counterpart
         d_p = squared_pairwise_distance()([anchor_embedding, anchor_embedding])
-        k_d_p = k_largest_indexes(k=1, idx_dims=1)(d_p)
-        positive_k_idx = Lambda(lambda x: K.gather(x, k_d_n[:, 0]))(k_d_p)
 
-        return Model([input_x, input_z], Concatenate(axis=-1, name="aligned_triplet")([k_d_n, positive_k_idx]), name='mined_triplets')
+        if self.online_mining == 'pairs-both' or 'pairs-negative':
+
+            # we first mine negative values
+            k_d_n = Lambda(lambda x: k_largest_indexes(k=self.batchsize // self.online_mining_ratio)(-x))(d_n)
+
+            # then, for each positive pair, we mine its positive counterpart
+            k_d_p = k_largest_indexes(k=1, idx_dims=1)(d_p)
+            positive_k_idx = Lambda(lambda x: K.gather(x, k_d_n[:, 0]))(k_d_p)
+
+            triplets = Concatenate(axis=-1, name="aligned_triplet")([k_d_n, positive_k_idx])
+
+        elif self.online_mining == 'both' or self.online_mining == 'negative':
+            k_d_a = K.tf.range(0, n)
+            k_d_n = k_largest_indexes(k=1, idx_dims=1)(-d_n)[:n]
+            k_d_p = k_largest_indexes(k=1, idx_dims=1)(d_p)[:n]
+
+            triplets = Concatenate(axis=-1, name="aligned_triplet")([k_d_a, k_d_n, k_d_p])
+
+        return Model([input_x, input_z], triplets, name='mined_triplets')
 
     def build_trainer(self):
         input_x = Input(shape=self.input_shape)
@@ -349,7 +366,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         constant_mean = K.tf.stop_gradient(mean_norm)
         constant_mean = K.tf.stop_gradient(constant_mean)
         # constant_mean = K.tf.Print(constant_mean, [k_grad_norms, k_loss_ratios], message="v: ")
-        nonnegativity = K.tf.nn.l2_loss(K.tf.nn.relu(K.tf.negative(self.losses["ae_loss"].backend-0.1)))  # regularizer
+        nonnegativity = K.tf.nn.l2_loss(K.tf.nn.relu(K.tf.negative(self.losses["ae_loss"].backend - 0.1)))  # regularizer
         gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean)) + 0.1 * nonnegativity
         opt = self.optimizers["opt_gradnorm"]
         trainable_weights = [self.losses["ae_loss"].backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
