@@ -256,15 +256,15 @@ def squared_pairwise_distance():
     return Lambda(_squared_pairwise_distance)
 
 
-def k_largest_indexes(k, idx_dims=2):
+def k_largest_indexes(k, idx_dims=2, signal=1):
     def _k_largest_indexes(x):
         if idx_dims > 1:
-            _, idx = K.tf.nn.top_k(K.flatten(x), k=k, sorted=True)
+            _, idx = K.tf.nn.top_k(K.flatten(x*signal), k=k, sorted=True)
             multi_dimensional_idx = K.tf.stack([idx // K.shape(x)[1], idx % K.shape(x)[1]], axis=1)
             # multi_dimensional_idx = K.tf.Print(multi_dimensional_idx, [multi_dimensional_idx.shape,])
             return multi_dimensional_idx
         else:
-            _, idx = K.tf.nn.top_k(x, k=k, sorted=True)
+            _, idx = K.tf.nn.top_k(x*signal, k=k, sorted=True)
             return idx
 
     return Lambda(_k_largest_indexes)

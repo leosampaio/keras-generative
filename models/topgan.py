@@ -16,7 +16,7 @@ from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
                            eq_triplet_lossfun_creator,
                            triplet_std_creator, generic_triplet_lossfun_creator,
                            topgan_began_dis_lossfun, topgan_began_gen_lossfun,
-                           ae_lossfun)
+                           ae_lossfun, quadruplet_lossfun_creator)
 
 from .layers import (conv2d, deconv2d, LayerNorm, squared_pairwise_distance,
                      k_largest_indexes, print_tensor_shape)
@@ -46,6 +46,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                  use_sigmoid_triplet=False,
                  online_mining=None,
                  online_mining_ratio=1,
+                 use_quadruplet=False,
+                 generator_mining=False,
                  **kwargs):
 
         self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
@@ -91,9 +93,12 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         self.gradnorm_alpha = gradnorm_alpha
         self.distance_metric = distance_metric
         self.use_sigmoid_triplet = use_sigmoid_triplet
+        self.use_quadruplet = use_quadruplet
+        self.generator_mining = generator_mining
 
         self.online_mining = online_mining
         self.online_mining_ratio = online_mining_ratio
+        self.mining_model = None
 
         if self.use_magan_equilibrium:
             self.gamma = 1.
@@ -108,7 +113,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         z_latent_dis = np.random.normal(size=(self.batchsize, self.z_dims))
         x_permutation = np.array(np.random.permutation(self.batchsize), dtype='int64')
 
-        if self.mining_model:
+        if self.mining_model is not None:
             triplets = self.mining_model.predict([x_data, z_latent_dis], batch_size=self.batchsize // self.online_mining_ratio)
             x_data = x_data[triplets[:, 0]]
             z_latent_dis = z_latent_dis[triplets[:, 1]]
@@ -182,27 +187,32 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         d_n = squared_pairwise_distance()([anchor_embedding, negative_embedding])
         d_p = squared_pairwise_distance()([anchor_embedding, anchor_embedding])
 
+        if self.generator_mining:
+            signal = 1
+        else:
+            signal = -1
+
         if self.online_mining == 'pairs-both' or 'pairs-negative':
 
             # we first mine negative values
-            k_d_n = Lambda(lambda x: k_largest_indexes(k=self.batchsize // self.online_mining_ratio)(-x))(d_n)
+            k_d_n = Lambda(lambda x: k_largest_indexes(k=self.batchsize // self.online_mining_ratio, signal=signal)(x))(d_n)
 
             # then, for each positive pair, we mine its positive counterpart
-            k_d_p = k_largest_indexes(k=1, idx_dims=1)(d_p)
+            k_d_p = k_largest_indexes(k=1, idx_dims=1, signal=-signal)(d_p)
             positive_k_idx = Lambda(lambda x: K.gather(x, k_d_n[:, 0]))(k_d_p)
 
             triplets = Concatenate(axis=-1, name="aligned_triplet")([k_d_n, positive_k_idx])
 
         elif self.online_mining == 'both' or self.online_mining == 'negative':
             k_d_a = K.tf.range(0, n)
-            k_d_n = k_largest_indexes(k=1, idx_dims=1)(-d_n)[:n]
-            k_d_p = k_largest_indexes(k=1, idx_dims=1)(d_p)[:n]
+            k_d_n = k_largest_indexes(k=1, idx_dims=1, signal=signal)(d_n)[:n]
+            k_d_p = k_largest_indexes(k=1, idx_dims=1, signal=-signal)(d_p)[:n]
 
             triplets = Concatenate(axis=-1, name="aligned_triplet")([k_d_a, k_d_n, k_d_p])
 
         return Model([input_x, input_z], triplets, name='mined_triplets')
 
-    def build_trainer(self):
+    def build_trainer(self, use_quadruplet=False):
         input_x = Input(shape=self.input_shape)
         input_noise = Input(shape=self.input_shape)
         input_x_perm = Input(shape=(1,), dtype='int64')
@@ -228,8 +238,6 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         input = [input_x, input_noise, input_x_perm, input_z]
 
         concatenated_dis = Concatenate(axis=-1, name="dis_classification")([p, q])
-        concatenated_triplet = Concatenate(axis=-1, name="triplet")(
-            [anchor_embedding, positive_embedding, negative_embedding])
         concatenated_data_triplet = Concatenate(axis=-1, name="data_triplet")(
             [fix_dim(input_x), fix_dim(shuffled_x), fix_dim(x_hat)])
         concatenated_began_recons = Concatenate(axis=-1, name="began_ae")(
@@ -237,18 +245,29 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         concatenated_ae = Concatenate(axis=-1, name="ae")(
             [fix_dim(input_x), fix_dim(x_rec_noise)])
 
-        if self.use_alignment_layer:
-            aligned_negative_embedding = self.alignment_layer(negative_embedding)
-            concatenated_aligned_triplet = Concatenate(axis=-1, name="aligned_triplet")(
-                [anchor_embedding, positive_embedding, aligned_negative_embedding])
-            output = [concatenated_dis, concatenated_triplet, concatenated_ae,
-                      concatenated_aligned_triplet,
-                      concatenated_aligned_triplet, concatenated_data_triplet,
-                      concatenated_began_recons]
+        if not use_quadruplet:
+            triplet = Concatenate(axis=-1, name="triplet")(
+                [anchor_embedding, positive_embedding, negative_embedding])
+            metric_triplet = triplet
         else:
-            output = [concatenated_dis, concatenated_triplet, concatenated_ae,
-                      concatenated_triplet, concatenated_triplet,
-                      concatenated_data_triplet, concatenated_began_recons]
+            nn_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(negative_embedding)
+            triplet = Concatenate(axis=-1, name="triplet")(
+                [anchor_embedding, positive_embedding, negative_embedding, nn_embedding])
+            metric_triplet = Concatenate(axis=-1, name="triplet_metrics")(
+                [anchor_embedding, positive_embedding, negative_embedding])
+
+        # if self.use_alignment_layer:
+        #     aligned_negative_embedding = self.alignment_layer(negative_embedding)
+        #     concatenated_aligned_triplet = Concatenate(axis=-1, name="aligned_triplet")(
+        #         [anchor_embedding, positive_embedding, aligned_negative_embedding])
+        #     output = [concatenated_dis, triplet, concatenated_ae,
+        #               metric_triplet,
+        #               metric_triplet, concatenated_data_triplet,
+        #               concatenated_began_recons]
+        # else:
+        output = [concatenated_dis, triplet, concatenated_ae,
+                  metric_triplet, metric_triplet,
+                  concatenated_data_triplet, concatenated_began_recons]
         return Model(input, output, name='topgan')
 
     def build_model(self):
@@ -305,7 +324,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                                  loss_weights=loss_weights)
 
         # build generators
-        self.gen_trainer = self.build_trainer()
+        self.gen_trainer = self.build_trainer(use_quadruplet=self.use_quadruplet)
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
@@ -320,7 +339,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
         opt_g = Adam(lr=self.lr, beta_1=0.5)
         opt_ae = Adam(lr=self.lr)
-        opt_gradnorm = Adam(lr=self.lr, beta_1=0.5)
+        opt_gradnorm = SGD(lr=self.lr)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
                 "opt_ae": opt_ae,
@@ -331,13 +350,16 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             triplet_d = eq_triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, k=self.k_gd_ratio,
                                                    simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
         else:
-            triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
+            triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric)
+        if self.use_quadruplet:
+            triplet_g = quadruplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, ttype='inverted', distance_metric=self.distance_metric)
+        else:
+            triplet_g = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, ttype='inverted', distance_metric=self.distance_metric)
         return (discriminator_lossfun, generator_lossfun,
-                triplet_d,
-                triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, inverted=True, distance_metric=self.distance_metric),
+                triplet_d, triplet_g,
                 triplet_balance_creator(margin=self.triplet_margin, zdims=self.embedding_size, gamma=K.variable(self.gamma), distance_metric=self.distance_metric),
                 triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric),
-                generic_triplet_lossfun_creator(margin=self.triplet_margin, inverted=True, distance_metric=self.distance_metric))
+                generic_triplet_lossfun_creator(margin=self.triplet_margin, ttype='inverted', distance_metric=self.distance_metric))
 
     def build_grad_norm_trainer(self, initial_losses=1.):
         individual_grad_norms = []

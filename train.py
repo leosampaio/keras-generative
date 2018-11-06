@@ -56,6 +56,9 @@ def main():
     parser.add_argument('--gradnorm-alpha', default=0.5, type=float)
     parser.add_argument('--distance-metric', default='l2', type=str)
     parser.add_argument('--slack-channel', type=str, default="random")
+    parser.add_argument('--use-quadruplet', action='store_true')
+    parser.add_argument('--generator-mining', action='store_true')
+
 
     args = parser.parse_args()
 

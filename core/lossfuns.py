@@ -1,54 +1,84 @@
 from keras import backend as K
 import numpy as np
 
-def triplet_distances(a, p, n, metric='l2'):
+
+def triplet_distances(a, p, n, metric='l2', nn=None):
     if metric == 'l2':
         # d_p = K.tf.norm((a - p), axis=1, ord=2)
         # d_n = K.tf.norm((a - n), axis=1, ord=2)
         d_p = K.sqrt(K.maximum(K.epsilon(), K.sum(K.square(a - p), axis=1)))
         d_n = K.sqrt(K.maximum(K.epsilon(), K.sum(K.square(a - n), axis=1)))
+        if nn is not None:
+            d_nn = K.sqrt(K.maximum(K.epsilon(), K.sum(K.square(n - nn), axis=1)))
         # d_p = K.tf.Print(d_p, [d_p, d_n, K.shape(d_p)], message="[dp, dn]:")
     elif metric == 'l1':
         d_p = K.tf.norm((a - p), axis=1, ord=1)
         d_n = K.tf.norm((a - n), axis=1, ord=1)
+        if nn is not None:
+            d_nn = K.tf.norm((n - nn), axis=1, ord=1)
     elif metric == 'inf':
         d_p = K.tf.norm((a - p), axis=1, ord=np.inf)
         d_n = K.tf.norm((a - n), axis=1, ord=np.inf)
+        if nn is not None:
+            d_nn = K.tf.norm((n - nn), axis=1, ord=np.inf)
     elif metric == 'cos':
         norm_a, norm_p, norm_n = K.tf.nn.l2_normalize(a, axis=1), K.tf.nn.l2_normalize(p, axis=1), K.tf.nn.l2_normalize(n, axis=1)
-        d_p = -K.sum(norm_a*norm_p, axis=1)
-        d_n = -K.sum(norm_a*norm_n, axis=1)
+        d_p = -K.sum(norm_a * norm_p, axis=1)
+        d_n = -K.sum(norm_a * norm_n, axis=1)
+        if nn is not None:
+            norm_nn = K.tf.nn.l2_normalize(nn, axis=1)
+            d_nn = -K.sum(norm_nn * norm_n, axis=1)
 
-    return d_p, d_n
+    if nn is not None:
+        return d_p, d_n, d_nn
+    else:
+        return d_p, d_n
 
 
-def triplet_lossfun_creator(margin=1., zdims=256, inverted=False, simplified=False, distance_metric='l2', type='normal'):
+def triplet_lossfun_creator(margin=1., zdims=256, distance_metric='l2', ttype='normal'):
     def triplet_lossfun(_, y_pred):
 
         m = K.ones((K.shape(y_pred)[0],)) * margin
         zero = K.zeros((K.shape(y_pred)[0],))
         a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
         d_p, d_n = triplet_distances(a, p, n, metric=distance_metric)
-        if inverted:
+        if ttype == 'inverted':
             return K.mean(K.maximum(zero, - d_p + d_n))
-        elif simplified:
+        elif ttype == 'simplified':
             return K.mean(K.maximum(zero, m - d_p))
-        else:
+        elif ttype == 'normal':
             return K.mean(K.maximum(zero, m + d_p - d_n))
 
     return triplet_lossfun
 
 
-def generic_triplet_lossfun_creator(margin=1., inverted=False, simplified=False, distance_metric='l2'):
+def quadruplet_lossfun_creator(margin=1., zdims=256, distance_metric='l2', ttype='normal'):
+    def quadruplet_lossfun(_, y_pred):
+
+        m = K.ones((K.shape(y_pred)[0],)) * margin
+        zero = K.zeros((K.shape(y_pred)[0],))
+        a, p, n, nn = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        d_p, d_n, d_nn = triplet_distances(a, p, n, nn=nn, metric=distance_metric)
+        if ttype == 'inverted':
+            return K.mean(K.maximum(zero, - d_p + d_n) + K.maximum(zero, d_n - d_nn))
+        elif ttype == 'simplified':
+            return K.mean(K.maximum(zero, m - d_p))
+        elif ttype == 'normal':
+            return K.mean(K.maximum(zero, m + d_p - d_n))
+
+    return quadruplet_lossfun
+
+
+def generic_triplet_lossfun_creator(margin=1., ttype='normal', distance_metric='l2'):
     def triplet_lossfun(_, y_pred):
 
         m = K.ones((K.shape(y_pred)[0],)) * margin
         zero = K.zeros((K.shape(y_pred)[0],))
         a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         d_p, d_n = triplet_distances(a, p, n, metric=distance_metric)
-        if inverted:
+        if ttype == 'inverted':
             return K.mean(K.maximum(zero, - d_p + d_n))
-        elif simplified:
+        elif ttype == 'simplified':
             return K.mean(K.maximum(zero, m - d_p))
         else:
             return K.mean(K.maximum(zero, m + d_p - d_n))
@@ -194,6 +224,7 @@ def began_gen_lossfun(y_true, y_pred):
     ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
     return ae_loss
 
+
 def ae_lossfun(y_true, y_pred):
     """
     y_pred[:,0]: x
@@ -326,6 +357,7 @@ def con_began_ae_lossfun(y_true, y_pred):
     half_x_reconstructed = y_pred[..., 5]
     con_ae_loss = K.mean(K.abs(half_x - half_x_reconstructed)) - K.mean(K.abs(half_x - con_half_x))
     return con_ae_loss
+
 
 def topgan_began_gen_lossfun(y_true, y_pred):
     """
