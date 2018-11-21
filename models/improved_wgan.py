@@ -16,7 +16,7 @@ from core.lossfuns import (wasserstein_dis_lossfun, wasserstein_gen_lossfun,
                            wgan_gradient_penalty_lossfun)
 
 from .utils import (set_trainable, smooth_binary_labels)
-from .layers import conv2d, deconv2d, RandomWeightedAverage
+from .layers import conv2d, deconv2d, RandomWeightedAverage, print_tensor_shape
 
 
 class ImprovedWGAN(BaseModel):
@@ -104,18 +104,11 @@ class ImprovedWGAN(BaseModel):
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
                                  loss=wasserstein_gen_lossfun)
 
-        # store trainers
-        self.store_to_save('gen_trainer')
-        self.store_to_save('dis_trainer')
+        self.gen_trainer.summary()
 
     def build_optmizers(self):
         return {"opt_d": Adam(lr=self.lr, beta_1=0.5),
                 "opt_g": Adam(lr=self.lr, beta_1=0.5)}
-
-    def save_model(self, out_dir, epoch):
-        self.trainers['f_Gx'] = self.f_Gx
-        self.trainers['f_D'] = self.f_D
-        super().save_model(out_dir, epoch)
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -196,7 +189,7 @@ class ImprovedWGAN(BaseModel):
         images_from_set = self.dataset.images[perm[:n]]
 
         self.save_precomputed_features('generated_and_real_samples', generated_images, Y=images_from_set)
-        return images_from_set, generated_images
+        return generated_images, images_from_set
 
     def compute_generated_image_samples(self, n=36):
         np.random.seed(14)
@@ -205,6 +198,33 @@ class ImprovedWGAN(BaseModel):
 
         generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
         return generated_images
+
+    def compute_generated_samples_and_possible_labels(self, n=10000):
+        np.random.seed(14)
+        samples = np.random.normal(size=(n, self.z_dims))
+        np.random.seed()
+
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
+
+        self.save_precomputed_features('generated_samples_and_possible_labels', generated_images, Y=self.dataset.attr_names)
+        return generated_images, self.dataset.attr_names
+
+    def compute_classification_samples(self, n=26000):
+
+        np.random.seed(14)
+        samples = np.random.normal(size=(n, self.z_dims))
+        np.random.seed()
+
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
+        images_from_set, _ = self.dataset.get_random_fixed_batch(32)
+
+        import keras
+        model = keras.models.load_model('mnist_mode_count_classifier.h5')
+        x_hat_pred = model.predict(generated_images, batch_size=64)
+        x_pred = model.predict(images_from_set, batch_size=64)
+
+        self.save_precomputed_features('classification_sample', x_hat_pred, Y=x_pred)
+        return x_hat_pred, x_pred
 
 
 class ImprovedWGANwithDCGAN(ImprovedWGAN):
@@ -310,3 +330,86 @@ class ImprovedWGANwithBEGAN(ImprovedWGAN):
         x = Activation('sigmoid')(x)
 
         return Model(embedding_input, x)
+
+
+class ImprovedWGANwithMLP(ImprovedWGAN):
+    name = 'improved-wgan-mlp-synth-veegan'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = Dense(128)(inputs)
+        x = Activation('relu')(x)
+        x = Dense(128)(x)
+        x = Activation('relu')(x)
+        x = Dense(128)(x)
+
+        return Model(inputs, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+
+        x = Dense(128)(z_input)
+        x = Activation('relu')(x)
+        x = Dense(128)(x)
+        x = Activation('relu')(x)
+        x = Dense(np.prod(self.input_shape))(x)
+
+        return Model(z_input, x)
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(128,))
+
+        x = Activation('relu')(embedding_input)
+        x = Dense(128)(x)
+        x = Activation('relu')(x)
+        x = Dense(1)(x)
+
+        return Model(embedding_input, x)
+
+class ImprovedWGANSmall2(ImprovedWGAN):
+    name = 'improved-wgan-small2'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        if self.input_shape[0] == 32:
+            x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+        elif self.input_shape[0] == 64:
+            x = conv2d(64, (4, 4), strides=(4, 4), bnorm=False, activation='relu')(inputs)
+        elif self.input_shape[0] == 128:
+            x = conv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(inputs)
+            x = conv2d(64, (4, 4), strides=(4, 4), bnorm=False, activation='relu')(x)
+        x = conv2d(8, (4, 4), strides=(2, 2), bnorm=False, activation='relu')(x)
+        x = Flatten()(x)
+        x = Dense(512)(x)
+
+        return Model(inputs, x)
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(512,))
+
+        x = Activation('relu')(embedding_input)
+        x = Dense(1)(x)
+        x = Activation('sigmoid')(x)
+
+        return Model(embedding_input, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        w = 8  # starting width
+        x = Dense(8 * w * w)(z_input)
+        x = Activation('relu')(x)
+        x = Reshape((w, w, 8))(x)
+
+        if self.input_shape[0] >= 64:
+            x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
+        if self.input_shape[0] >= 128:
+            x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
+        x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
+        x = deconv2d(64, (4, 4), strides=(2, 2), bnorm=False, activation='relu', padding='same')(x)
+        x = conv2d(orig_channels, (3, 3), strides=(1, 1), bnorm=False, activation=None, padding='same')(x)
+
+        return Model(z_input, x)

@@ -1,12 +1,59 @@
+import tensorflow as tf
+import numpy as np
+import os
+import math
+from time import gmtime, strftime
 import os
 import argparse
 
 from keras import backend as K
+from keras import optimizers
+from keras import layers
 import models
 from datasets import load_dataset
+from models.utils import plot_metrics
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+from core.notifyier import notify_with_message, notify_with_image
 
+
+def get_inference_via_optimization(model, data):
+
+    total_iters = 10000
+
+    input_x = layers.Input(shape=model.input_shape)
+    latent_z = K.variable(np.random.normal(size=(model.batchsize, model.z_dims)))
+    x_hat = model.f_Gx(latent_z)
+    mse = K.mean(K.square(x_hat - input_x))
+    opt = optimizers.RMSprop(lr=1e-2)
+    updates = opt.get_updates([latent_z], [], mse)
+
+    ivom_trainer = K.function([input_x], [x_hat, mse], updates=updates)
+
+    random_real_data, _ = data.get_random_fixed_batch(n=model.batchsize)
+
+    for b in range(total_iters):
+        x_hat, loss = ivom_trainer([random_real_data])
+        print('[Metrics] Training Classifier for Mode Estimation... B{}/{}: loss = {}'.format(b, total_iters, loss), end='\r')
+    message = '[Metrics] Training Classifier for Mode Estimation... B{}/{}: loss = {}'.format(b, total_iters, loss)
+    print(message)
+
+    imgs = np.zeros((len(random_real_data)*2,) + random_real_data.shape[1:])
+    imgs[0::2] = random_real_data
+    imgs[1::2] = x_hat
+    imgs = np.clip(imgs, 0., 1.)
+
+    figname = 'output/eval_cifar_{}.png'.format(model.experiment_id)
+    plot_metrics(figname,
+                 metrics_list=[imgs],
+                 iterations_list=[1],
+                 metric_names=['IvOM'],
+                 types=['image-grid'],
+                 legend=True,
+                 figsize=8,
+                 wspace=0.15)
+
+    notify_with_message(message, model.experiment_id)
+    notify_with_image(figname, model.experiment_id)
 
 def main():
     # Parsing arguments
@@ -60,12 +107,10 @@ def main():
     parser.add_argument('--use-quadruplet', action='store_true')
     parser.add_argument('--generator-mining', action='store_true')
 
-
     args = parser.parse_args()
 
     # select gpu and limit resources if applicable
     if 'tensorflow' == K.backend():
-        import tensorflow as tf
         from keras.backend.tensorflow_backend import set_session
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
@@ -87,8 +132,7 @@ def main():
     if args.resume:
         model.load_model(args.resume)
 
-    model.main_loop(dataset, epochs=args.epoch, batchsize=args.batchsize)
-
+    get_inference_via_optimization(model, dataset)
 
 if __name__ == '__main__':
     main()

@@ -56,6 +56,8 @@ class BaseModel(metaclass=ABCMeta):
 
         self.checkpoint_every = kwargs.get('checkpoint_every', "1")
         self.notify_every = kwargs.get('notify_every', self.checkpoint_every)
+        self.send_every = kwargs.get('send_every', 1)
+        self.notification_counter = 0
         self.lr = kwargs.get('lr', 1e-4)
         self.z_dims = kwargs.get('z_dims', 100)
 
@@ -116,6 +118,7 @@ class BaseModel(metaclass=ABCMeta):
         except ValueError:
             self.checkpoint_every = int(float(self.checkpoint_every) * len(dataset))
 
+
         # Create output directories if not exist
         self.dataset = dataset
         out_dir = os.path.join(self.output, self.experiment_id)
@@ -133,6 +136,9 @@ class BaseModel(metaclass=ABCMeta):
         self.tmp_out_dir = os.path.join(out_dir, 'tmp')
         if not os.path.isdir(self.tmp_out_dir):
             os.mkdir(self.tmp_out_dir)
+
+        self.current_fract_epoch = self.processed_images / len(self.dataset)
+        self.last_epoch = int(self.current_fract_epoch)
 
         # Start training
         print('\n\n--- START TRAINING ---\n')
@@ -382,10 +388,12 @@ class BaseModel(metaclass=ABCMeta):
         log_message = self.compute_all_metrics()
         did_plot = self.plot_all_metrics(outfile)
         print(log_message)
-        try:
-            message = "[{}] ProcImgs #{:04} Epoch #{}".format(self.experiment_id, self.processed_images, self.current_fract_epoch)
-            notify_with_message(log_message, self.experiment_id)
-            if did_plot:
-                notify_with_image(outfile, experiment_id=self.experiment_id, message=message)
-        except NameError as e:
-            print(repr(e))
+        if self.notification_counter % self.send_every == 0:
+            try:
+                message = "[{}] ProcImgs #{:04} Epoch #{}".format(self.experiment_id, self.processed_images, self.current_fract_epoch)
+                notify_with_message(log_message, self.experiment_id)
+                if did_plot:
+                    notify_with_image(outfile, experiment_id=self.experiment_id, message=message)
+            except NameError as e:
+                print(repr(e))
+        self.notification_counter += 1

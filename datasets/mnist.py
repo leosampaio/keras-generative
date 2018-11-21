@@ -21,3 +21,4 @@ def load_data(original=False, use_rgb=False):
     y_train = y_train.astype('float32')
 
     return x_train, y_train, x_test, y_test, [int(i) for i in range(10)]
+

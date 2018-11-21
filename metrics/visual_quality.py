@@ -9,6 +9,7 @@ import numpy as np
 import tensorflow as tf
 import keras.backend as K
 from sklearn.neighbors import NearestNeighbors
+from scipy.stats import entropy
 
 from core.metrics import HistoryMetric, ProjectionMetric
 from metrics import inception_score
@@ -116,8 +117,21 @@ class SyntheticDatasetVis(ProjectionMetric):
 
     def compute(self, input_data):
         x_hat, x = input_data
-        y = np.concatenate((np.zeros((len(x_hat),)), np.ones((len(x),))))
+        y = np.concatenate((np.ones((len(x_hat),)) * -1, np.ones((len(x),))))
         x_all = np.concatenate((x, x_hat), axis=0)
+
+        return np.concatenate((x_all, np.expand_dims(y, axis=1)),
+                              axis=1)
+
+
+class SyntheticDatasetVis(ProjectionMetric):
+    name = 'synthetic-data-vis-generated'
+    input_type = 'generated_and_real_samples'
+
+    def compute(self, input_data):
+        x_hat, x = input_data
+        y = np.concatenate((np.ones((1,)) * -1, np.ones((len(x),))))
+        x_all = np.concatenate((x[:1], x_hat), axis=0)
 
         return np.concatenate((x_all, np.expand_dims(y, axis=1)),
                               axis=1)
@@ -167,3 +181,43 @@ class SyntheticDatasetHighQualitySamples(HistoryMetric):
         high_quality_samples_ratio = np.mean(distances < limit)
 
         return high_quality_samples_ratio
+
+
+class StackedMNISTModeEstimator(HistoryMetric):
+    name = 'mode-count-estimator'
+    input_type = 'classification_samples'
+
+    def compute(self, input_data):
+        prediction_x_hat, prediction_x = input_data
+
+        modes = len(np.unique(np.argmax(prediction_x_hat, axis=1)))
+
+        return modes
+
+
+class StackedMNISTKL(HistoryMetric):
+    name = 'clas-kl-divergence'
+    input_type = 'classification_samples'
+
+    def compute(self, input_data):
+        prediction_x_hat, prediction_x = input_data
+
+        p_false = np.argmax(prediction_x_hat, axis=1)
+        # p_real = np.argmax(prediction_x, axis=1)
+        total_modes = prediction_x_hat.shape[1]
+
+        modes_count = np.zeros((total_modes, 1))
+        for i in range(p_false.shape[0]):
+            modeNum = int(p_false[i])
+            modes_count[modeNum] += 1
+
+        # calculate KL
+        modes_count_normalized = modes_count / np.sum(modes_count)
+        kl = 0
+        Pdata = 1. / total_modes
+        for i in range(total_modes):
+            if int(modes_count[i]) == 0:
+                continue
+            kl += modes_count_normalized[i] * (np.log(modes_count_normalized[i]) - np.log(Pdata))
+
+        return kl[0]

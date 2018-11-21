@@ -3,6 +3,7 @@ from pprint import pprint
 import numpy as np
 import sklearn as sk
 
+import keras
 from keras import Input, Model
 from keras.layers import (Flatten, Dense, Activation, Reshape,
                           BatchNormalization, Concatenate, Add,
@@ -149,7 +150,10 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             K.set_value(self.k_gd_ratio, ld['k'])
         else:
             ld['k'] = 1
-        self.did_set_g_triplet_count += int(K.get_value(self.losses['g_triplet'].backend) > 0.)
+        try:
+            self.did_set_g_triplet_count += int(K.get_value(self.losses['g_triplet'].backend) > 0.)
+        except:
+            pass
         if (self.use_magan_equilibrium and
                 (K.get_value(self.triplet_margin) > self.losses['g_triplet'].get_mean_of_latest(100)) and
                 self.did_set_g_triplet_count >= 100):
@@ -334,6 +338,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         # store trainers
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, True)
+
+        self.gen_trainer.summary()
 
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
@@ -523,6 +529,22 @@ class TOPGANwithAEfromBEGAN(BaseModel):
     """
         Define computation of metrics inputs
     """
+
+    def compute_classification_samples(self, n=26000):
+
+        np.random.seed(14)
+        samples = np.random.normal(size=(n, self.z_dims))
+        np.random.seed()
+
+        generated_images = self.f_Gx.predict(samples, batch_size=self.batchsize)
+        images_from_set, _ = self.dataset.get_random_fixed_batch(32)
+
+        model = keras.models.load_model('mnist_mode_count_classifier.h5')
+        x_hat_pred = model.predict(generated_images, batch_size=64)
+        x_pred = model.predict(images_from_set, batch_size=64)
+
+        self.save_precomputed_features('classification_sample', x_hat_pred, Y=x_pred)
+        return x_hat_pred, x_pred
 
     def compute_labelled_embedding(self, n=10000):
         x_data, y_labels = self.dataset.get_random_fixed_batch(n)
@@ -1150,7 +1172,9 @@ class TOPGANwithAEmlpSynthNoRegVeegan(TOPGANwithAEfromBEGAN):
 
         x = Activation('relu')(embedding_input)
         x = Dense(128)(x)
+        x = Activation('relu')(x)
         x = Dense(1)(x)
+        x = Activation('sigmoid')(x)
 
         return Model(embedding_input, x, name='clas')
 

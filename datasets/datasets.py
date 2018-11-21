@@ -14,6 +14,7 @@ from datasets import celeba
 from datasets import mixture
 
 import sklearn as sk
+import keras
 
 
 class Dataset(object):
@@ -100,6 +101,72 @@ class ConditionalDataset(Dataset):
             general_cursor += batchsize
             indx = perm[b:b + batchsize]
             x_data, y_data = self.images[indx], self.attrs[indx]
+            yield x_data, y_data, general_cursor
+
+
+class StackedDataset(Dataset):
+
+    def _get_shape(self):
+        return list(self.images.shape[:-1]) + [3]
+
+    shape = property(_get_shape)
+
+    def get_random_fixed_batch(self, n=32):
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.images))
+        perm2 = np.random.permutation(len(self.images))
+        perm3 = np.random.permutation(len(self.images))
+        x_data = np.concatenate([self.images[perm[:n]], self.images[perm2[:n]], self.images[perm3[:n]]], axis=-1)
+        y_data = np.vstack((np.argmax(self.attrs[perm[:n]], axis=1), np.argmax(self.attrs[perm2[:n]], axis=1), np.argmax(self.attrs[perm3[:n]], axis=1)))
+        y_data = np.sum(y_data*np.transpose([[100, 10, 1]]), axis=0)
+        np.random.seed()
+        return x_data, y_data
+
+    def get_test_set(self):
+        if hasattr(self, 'x_test') and hasattr(self, 'y_test'):
+
+            np.random.seed(14)
+            perm = np.random.permutation(len(self.x_test))
+            np.random.seed(15)
+            perm2 = np.random.permutation(len(self.x_test))
+            np.random.seed()
+            x_test = np.concatenate((self.x_test, self.x_test[perm], self.x_test[perm2]), axis=-1)
+            y_test = np.argmax(self.y_test, axis=1)
+            y_test = np.sum((y_test*100, y_test[perm]*10, y_test[perm2]), axis=0)
+            return x_test, self.y_test
+        else:
+            raise KeyError("This dataset does not have a test set")
+
+    def get_random_perm_of_test_set(self, n):
+        if hasattr(self, 'x_test') and hasattr(self, 'y_test'):
+            np.random.seed(14)
+            perm = np.random.permutation(len(self.x_test))
+            np.random.seed()
+            x_data = np.concatenate([self.x_test[perm[:(n*3)]][i:i+n] for i in range(0, n*3, n)], axis=-1)
+            y_data = [self.y_test[perm[:(n*3)]][i:i+n] for i in range(0, n*3, n)]
+            y_data = np.sum(y_data*np.transpose([[100, 10, 1]]), axis=0)
+            return x_data, y_data
+        else:
+            raise KeyError("This dataset does not have a test set")
+
+    def has_test_set(self):
+        return hasattr(self, 'x_test')
+
+    def generator(self, batchsize):
+        general_cursor = 0
+        perm = np.random.permutation(len(self.images))
+        n_data = len(self.images)
+        for b in range(0, n_data, batchsize):
+            if batchsize*3 > n_data - b:
+                continue
+            general_cursor += batchsize
+            indx = perm[b:b + batchsize]
+            indx2 = perm[b + batchsize:(b + batchsize*2)%n_data]
+            indx3 = perm[(b + batchsize*2)%n_data:(b + batchsize*3)%n_data]
+            x_data = np.concatenate((self.images[indx], self.images[indx2], self.images[indx3]), axis=-1)
+            y_data = np.vstack((np.argmax(self.attrs[indx], axis=1), np.argmax(self.attrs[indx2], axis=1), np.argmax(self.attrs[indx3], axis=1)))
+            y_data = np.sum(y_data*np.transpose([[100, 10, 1]]), axis=0)
+            y_data = keras.utils.to_categorical(y_data, num_classes=1000)
             yield x_data, y_data, general_cursor
 
 
@@ -453,6 +520,9 @@ class LargeDataset(object):
 def load_dataset(dataset_name):
     if dataset_name == 'mnist':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
+        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data()
+    if dataset_name == 'stacked-mnist':
+        dataset = StackedDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data()
     elif dataset_name == 'mnist-original':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
