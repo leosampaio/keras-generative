@@ -91,12 +91,10 @@ class BaseModel(metaclass=ABCMeta):
         self.use_gradnorm = kwargs.get('use_gradnorm', False)
 
     def get_experiment_id(self):
-        id = "{}_zdim{}".format(self.name, self.z_dims)
-        for l, loss in self.losses.items():
-            id = "{}_L{}{}{}{}".format(id, l.replace('_', ''), loss.weight,
-                                       loss.weight_control_type.replace('-', ''),
-                                       loss.pivot_control_epoch)
-        return id.replace('.', '')
+        if hasattr(self, "dataset"):
+            return "{}_{}".format(self.name, self.dataset.name).replace('.', '').replace('-', '_')
+        else:
+            return self.name.replace('.', '').replace('-', '_')
 
     def _get_experiment_id(self):
         return self.get_experiment_id()
@@ -305,9 +303,15 @@ class BaseModel(metaclass=ABCMeta):
         else:
             return False
 
+    def plot_org_key_for_sort(self, x):
+        if isinstance(x, tuple):
+            return x[0]
+        else: 
+            return x
+
     def get_loss_metrics_for_plot(self, plot_organization):
         metrics, iters, names = [], [], []
-        for l in plot_organization:
+        for l in sorted(plot_organization, key=self.plot_org_key_for_sort):
             if isinstance(l, (tuple, list)):
                 submetrics, subiters, subnames, _ = self.get_loss_metrics_for_plot(l)
                 if submetrics:
@@ -325,7 +329,7 @@ class BaseModel(metaclass=ABCMeta):
     def get_loss_weight_metrics_for_plot(self):
         metrics, names = [], []
         contrast_increment = 0  # increment to help loss weight visualization
-        for l, loss in self.losses.items():
+        for l, loss in sorted(self.losses.items()):
             metrics.append(np.array(loss.weight_history) + contrast_increment)
             names.append(l)
             contrast_increment += 0.005
@@ -333,7 +337,7 @@ class BaseModel(metaclass=ABCMeta):
 
     def get_metrics_for_plot(self):
         metrics, iters, names, types = [], [], [], []
-        for m, metric in self.metrics.items():
+        for m, metric in sorted(self.metrics.items()):
             data = metric.get_data_for_plot()
             metrics.append(data)
             names.append(m)
