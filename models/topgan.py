@@ -152,7 +152,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             ld['k'] = 1
         try:
             self.did_set_g_triplet_count += int(K.get_value(self.losses['g_triplet'].backend) > 0.)
-        except:
+        except Exception as _:
             pass
         if (self.use_magan_equilibrium and
                 (K.get_value(self.triplet_margin) > self.losses['g_triplet'].get_mean_of_latest(100)) and
@@ -174,8 +174,17 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                 # ld['g_triplet'], ld['ae_loss'],
                 # ld['g_mean'], ld['g_std'],
                 # ld['data_triplet'], ld['began_g']])
+                self.gradnorm_adjustment = self.build_loss_weights_adjustment_calculator()
             input_data_gn = [x_data, noise, np.expand_dims(x_permutation, axis=-1), z_latent_dis] + label_data + [np.ones(len(y)) for _ in range(len(label_data))]
             ld['gradnorm'], = self.gradnorm_trainer(input_data_gn + input_data_gn)
+            if self.use_began_loss:
+                self.losses['began_d'].adjust_base_weight(K.get_value(self.losses['began_d'].backend))
+                self.losses['began_g'].adjust_base_weight(K.get_value(self.losses['began_g'].backend))
+            adjustment = K.eval(self.gradnorm_adjustment)
+            # ld['gradnorm'] = adjustment
+            d_triplet = K.get_value(self.losses['d_triplet'].backend)
+            self.losses['d_triplet'].adjust_base_weight(d_triplet)
+            self.losses['g_triplet'].adjust_base_weight(K.get_value(self.losses['g_triplet'].backend))
 
         return ld
 
@@ -297,11 +306,13 @@ class TOPGANwithAEfromBEGAN(BaseModel):
             x_triplet_weight = 0.
 
         if self.use_began_loss:
-            began_loss_w = self.losses['began_d'].backend
+            began_d_loss_w = self.losses['began_d'].backend
+            began_g_loss_w = self.losses['began_g'].backend
             ae_loss = 0.
         else:
             ae_loss = self.losses['ae_loss'].backend
-            began_loss_w = 0.
+            began_d_loss_w = 0.
+            began_g_loss_w = 0.
 
         if self.online_mining:
             self.mining_model = self.build_online_mining_model()
@@ -316,10 +327,10 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                 optimizer=self.optimizers["opt_ae"],
                 loss=[loss_d, triplet_d_loss, ae_lossfun, triplet_g_loss, t_std, x_triplet, topgan_began_dis_lossfun],
                 loss_weights=[0, 0, 0, 1.])
-            loss_weights = [self.losses['d_loss'].backend, 0, ae_loss, self.losses['d_triplet'].backend, std_dev_weight, 0., began_loss_w]
+            loss_weights = [self.losses['d_loss'].backend, 0, ae_loss, self.losses['d_triplet'].backend, std_dev_weight, 0., began_d_loss_w]
             set_trainable(self.alignment_layer, False)
         else:
-            loss_weights = [self.losses['d_loss'].backend, self.losses['d_triplet'].backend, ae_loss, 0., std_dev_weight, 0., began_loss_w]
+            loss_weights = [self.losses['d_loss'].backend, self.losses['d_triplet'].backend, ae_loss, 0., std_dev_weight, 0., began_d_loss_w]
         self.dis_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
@@ -333,7 +344,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
                                  loss=[loss_g, triplet_g_loss, ae_lossfun, t_mean, t_std, x_triplet, topgan_began_gen_lossfun],
-                                 loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, 0., 0., 0., x_triplet_weight, began_loss_w])
+                                 loss_weights=[self.losses['g_loss'].backend, self.losses['g_triplet'].backend, 0., 0., 0., x_triplet_weight, began_g_loss_w])
 
         # store trainers
         set_trainable(self.f_Gx, True)
@@ -345,7 +356,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
         opt_g = Adam(lr=self.lr, beta_1=0.5)
         opt_ae = Adam(lr=self.lr)
-        opt_gradnorm = SGD(lr=self.lr)
+        opt_gradnorm = Adam(lr=self.lr)
         return {"opt_d": opt_d,
                 "opt_g": opt_g,
                 "opt_ae": opt_ae,
@@ -371,33 +382,39 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         individual_grad_norms = []
         loss_ratios = []
         shared_layer_weights = self.encoder.trainable_weights
-        loss_tensors = self.dis_trainer.metrics_tensors  # + self.gen_trainer.metrics_tensors
-        loss_w_tensors = self.dis_trainer.loss_weights  # + self.gen_trainer.loss_weights
-        for l, w, ini in zip(loss_tensors, loss_w_tensors, initial_losses):
+        loss_tensors = self.dis_trainer.metrics_tensors + self.gen_trainer.metrics_tensors
+        loss_w_tensors = self.dis_trainer.loss_weights + self.gen_trainer.loss_weights
+        valued_w_tensors = []
+        for l, w in zip(loss_tensors, loss_w_tensors):
             if w != 0:
-                last_w = w
+                # last_w = w # alpha related
                 grads = K.tf.gradients(l, shared_layer_weights)
                 flattened_g = K.concatenate([K.flatten(g) for g in grads])
                 flattened_g = K.tf.where(K.tf.is_nan(flattened_g), K.tf.zeros_like(flattened_g), flattened_g)
                 grad_norm = K.tf.norm(flattened_g)
                 individual_grad_norms.append(grad_norm * w)
-                loss_ratios.append(l / ini)
+                valued_w_tensors.append(w)
+                # loss_ratios.append(l / ini) # alpha related
         k_grad_norms = K.stack(individual_grad_norms)
-        k_loss_ratios = K.stack(loss_ratios)
+        # k_loss_ratios = K.stack(loss_ratios) # alpha related
         # k_grad_norms = K.tf.Print(k_grad_norms, [grad_norm, l, last_w, l / ini], message="[grad, l, w, ratio]:")
 
-        alpha = self.gradnorm_alpha
+        # alpha = self.gradnorm_alpha # alpha related
         mean_norm = K.mean(k_grad_norms)
-        mean_loss_ratios = K.mean(k_loss_ratios)
-        inverse_train_rate = k_loss_ratios / mean_loss_ratios
+        # mean_loss_ratios = K.mean(k_loss_ratios) # alpha related
+        # inverse_train_rate = k_loss_ratios / mean_loss_ratios # alpha related
 
         constant_mean = K.tf.stop_gradient(mean_norm)
         constant_mean = K.tf.stop_gradient(constant_mean)
         # constant_mean = K.tf.Print(constant_mean, [k_grad_norms, k_loss_ratios], message="v: ")
-        nonnegativity = K.tf.nn.l2_loss(K.tf.nn.relu(K.tf.negative(self.losses["ae_loss"].backend - 0.1)))  # regularizer
+        if self.use_began_loss:
+            weight_to_adjust = self.losses["began_d"].backend
+        else:
+            weight_to_adjust = self.losses["ae_loss"].backend
+        nonnegativity = K.tf.nn.l2_loss(K.tf.nn.relu(K.tf.negative(weight_to_adjust)))  # regularizer
         gradnorm_loss = K.mean(K.abs(k_grad_norms - constant_mean)) + 0.1 * nonnegativity
         opt = self.optimizers["opt_gradnorm"]
-        trainable_weights = [self.losses["ae_loss"].backend]  # [l for l in self.dis_trainer.loss_weights if l != 0]
+        trainable_weights = valued_w_tensors #[weight_to_adjust]  # [l for l in self.dis_trainer.loss_weights if l != 0]
         updates = opt.get_updates(trainable_weights, [], gradnorm_loss)
         return K.function(self.dis_trainer._feed_inputs +
                           self.dis_trainer._feed_targets +
@@ -406,6 +423,25 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                           self.gen_trainer._feed_targets +
                           self.gen_trainer._feed_sample_weights,
                           [gradnorm_loss], updates=updates)
+
+    def build_loss_weights_adjustment_calculator(self):
+        if self.use_began_loss:
+            weight_to_adjust = self.losses["began_d"].backend * 2
+        else:
+            weight_to_adjust = self.losses["ae_loss"].backend
+        l_weights_tensors = self.dis_trainer.loss_weights + self.gen_trainer.loss_weights
+        valued_w_tensors = [l for l in l_weights_tensors if l != 0]
+        n = K.tf.cast(K.tf.count_nonzero(l_weights_tensors), dtype=K.tf.float32)
+        w_sum = K.sum(valued_w_tensors)
+        assignments = []
+        for w in valued_w_tensors:
+            assignment = K.tf.assign(w, w*(n/w_sum))
+            assignments.append(assignment)
+        assignments_k = K.stack(assignments)
+        # n = K.tf.cast(K.tf.count_nonzero(l_weights_tensors), dtype=K.tf.float32)
+        # n = K.tf.Print(n, [n])
+        desired_weight = (n - weight_to_adjust) / (n - 1)
+        return assignments_k
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1246,6 +1282,63 @@ class TOPGANwithAEfromDCGANRegularized(TOPGANwithAEfromBEGAN):
         x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
         x = Reshape((w, w, self.n_filters_factor * 8))(x)
         x = BatchNormalization()(x)
+        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+
+        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
+
+
+class TOPGANwithAEfromDCGANnobn(TOPGANwithAEfromBEGAN):
+    name = 'topgan-ae-dcgan-nobn'
+
+    def build_encoder(self):
+        inputs = Input(shape=self.input_shape)
+
+        x = conv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(inputs)
+        x = conv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(x)
+        x = conv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(x)
+        x = conv2d(self.n_filters_factor * 8, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(x)
+
+        x = Flatten()(x)
+        x = Dense(self.embedding_size)(x)
+
+        return Model(inputs, x)
+
+    def build_decoder(self):
+        z_input = Input(shape=(self.embedding_size,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**4
+
+        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
+        x = Reshape((w, w, self.n_filters_factor * 8))(x)
+        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
+
+        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
+
+        return Model(z_input, x)
+
+    def build_d_classifier(self):
+        embedding_input = Input(shape=(self.embedding_size,))
+
+        x = Dense(1)(embedding_input)
+        x = Activation('sigmoid')(x)
+
+        return Model(embedding_input, x)
+
+    def build_Gx(self):
+        z_input = Input(shape=(self.z_dims,))
+        orig_channels = self.input_shape[2]
+
+        w = self.input_shape[0] // 2**4
+
+        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
+        x = Reshape((w, w, self.n_filters_factor * 8))(x)
         x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
         x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
         x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)

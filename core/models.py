@@ -190,11 +190,11 @@ class BaseModel(metaclass=ABCMeta):
             new_loss, delta = loss.update_weight_based_on_time(self.current_fract_epoch)
             weight_delta = np.max((weight_delta, delta))
 
-        if weight_delta > 0.1:
-            for l in self.losses.values():
-                l.reset_weight_from_last_significant_change()
-            self.reset_optimizers()
-            print("[TRAINING] Did reset optmizers.")
+        # if weight_delta > 0.1:
+        #     for l in self.losses.values():
+        #         l.reset_weight_from_last_significant_change()
+        #     self.reset_optimizers()
+        #     print("[TRAINING] Did reset optmizers.")
 
     def update_loss_weights_report(self):
         for l, loss in self.losses.items():
@@ -332,7 +332,7 @@ class BaseModel(metaclass=ABCMeta):
         for l, loss in sorted(self.losses.items()):
             metrics.append(np.array(loss.weight_history) + contrast_increment)
             names.append(l)
-            contrast_increment += 0.005
+            contrast_increment += 0.001
         return [metrics], [1], [names], ['lines']
 
     def get_metrics_for_plot(self):

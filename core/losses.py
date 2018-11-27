@@ -120,6 +120,10 @@ class Loss(object):
         else:
             return np.std(self.history)
 
+    def adjust_base_weight(self, x):
+        self.weight = x
+        K.set_value(self.backend, x)
+
     def save(self, filepath):
         loss_dict = {
             "last_value": self.last_value,

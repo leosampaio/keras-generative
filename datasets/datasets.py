@@ -521,7 +521,7 @@ def load_dataset(dataset_name):
     if dataset_name == 'mnist':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data()
-    if dataset_name == 'stacked-mnist':
+    elif dataset_name == 'stacked-mnist':
         dataset = StackedDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data()
     elif dataset_name == 'mnist-original':
