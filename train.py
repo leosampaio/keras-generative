@@ -59,6 +59,9 @@ def main():
     parser.add_argument('--slack-channel', type=str, default="random")
     parser.add_argument('--use-quadruplet', action='store_true')
     parser.add_argument('--generator-mining', action='store_true')
+    parser.add_argument('--retrofit-embedding', action='store_true')
+    parser.add_argument('--tie-loss-weights', action='store_true')
+
 
 
     args = parser.parse_args()

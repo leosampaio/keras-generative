@@ -442,8 +442,9 @@ class BufferedDataset(object):
 
 class LargeDataset(object):
 
-    def __init__(self, datapath, buffer_size=50000):
+    def __init__(self, datapath, buffer_size=50000, name='dataset'):
 
+        self.name = name
         self.datapath = datapath
         print("Reading H5 file... ", end="")
         self.file = h5py.File(self.datapath, 'r')
@@ -548,19 +549,19 @@ def load_dataset(dataset_name):
         dataset = TimeCorelatedDataset(dataset_name.replace('-', ''), data)
     elif dataset_name == 'lsun-bedroom':
         datapath = lsun.load_data()
-        dataset = LargeDataset(datapath)
+        dataset = LargeDataset(datapath, name=dataset_name)
     elif dataset_name == 'celeba':
         datapath = celeba.load_data()
-        dataset = LargeDataset(datapath, buffer_size=20000)
+        dataset = LargeDataset(datapath, buffer_size=20000, name=dataset_name)
     elif dataset_name == 'celeba-128':
         datapath = celeba.load_data(image_size=128)
-        dataset = LargeDataset(datapath, buffer_size=5000)
+        dataset = LargeDataset(datapath, buffer_size=5000, name=dataset_name)
     elif dataset_name == 'celeba-crop-128':
         datapath = celeba.load_data(image_size=128, center_crop=True)
-        dataset = LargeDataset(datapath, buffer_size=5000)
+        dataset = LargeDataset(datapath, buffer_size=5000, name=dataset_name)
     elif dataset_name == 'celeba-crop-64':
         datapath = celeba.load_data(image_size=64, center_crop=True)
-        dataset = LargeDataset(datapath, buffer_size=20000)
+        dataset = LargeDataset(datapath, buffer_size=20000, name=dataset_name)
     elif dataset_name == 'synthetic-8ring':
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
         dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="ring", n=8, std=.05, r=1, density=5000)
