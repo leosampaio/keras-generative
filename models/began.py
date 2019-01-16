@@ -27,9 +27,9 @@ class BEGAN(BaseModel):
 
     def __init__(self,
                  input_shape=(64, 64, 3),
-                 embedding_dim=256,
+                 embedding_dim=64,
                  began_gamma=0.5,
-                 n_filters_factor=32,
+                 n_filters_factor=128,
                  began_k_lr=1e-3,
                  **kwargs):
         super().__init__(input_shape=input_shape, **kwargs)
@@ -48,7 +48,7 @@ class BEGAN(BaseModel):
         batchsize = len(x_data)
 
         # get real latent variables distribution
-        z_latent_dis = np.random.normal(size=(batchsize, self.z_dims))
+        z_latent_dis = np.random.uniform(low=-1.0, high=1.0, size=(batchsize, self.z_dims))
 
         input_data = [x_data, z_latent_dis]
         expanded_x = np.expand_dims(x_data, -1)
@@ -83,7 +83,7 @@ class BEGAN(BaseModel):
         concatenated_dis = Concatenate(axis=-1, name="ae")([x_hat,
                                                             x_hat_reconstructed,
                                                             x_reconstructed])
-        output = [concatenated_dis, x_hat, concatenated_dis]
+        output = [concatenated_dis, x_reconstructed, concatenated_dis]
         return Model(input, output, name='began')
 
     def build_model(self):
@@ -118,8 +118,8 @@ class BEGAN(BaseModel):
                                  loss_weights=[1., 0., 0.])
 
     def build_optmizers(self):
-        return {"opt_d": Adam(lr=self.lr),
-                "opt_g": Adam(lr=self.lr)}
+        return {"opt_d": Adam(lr=self.lr, beta_1=0.5, beta_2=0.999),
+                "opt_g": Adam(lr=self.lr, beta_1=0.5, beta_2=0.999)}
 
     def build_D(self):
         x_input = Input(shape=self.input_shape)
@@ -345,7 +345,7 @@ class BEGANwithBEGAN(BEGAN):
             x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
             x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
 
-        x = conv2d(orig_channels, (3, 3), activation=None)(x)
+        x = conv2d(orig_channels, (3, 3), activation='sigmoid')(x)
 
         return Model(z_input, x)
 
@@ -370,7 +370,7 @@ class BEGANwithBEGAN(BEGAN):
             x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
             x = conv2d(self.n_filters_factor, (3, 3), activation='elu')(x)
 
-        x = conv2d(orig_channels, (3, 3), activation=None)(x)
+        x = conv2d(orig_channels, (3, 3), activation='sigmoid')(x)
 
         return Model(z_input, x)
 

@@ -249,6 +249,9 @@ def ResDeconvLayer(filters,
     return fun
 
 
+rdeconv = ResDeconvLayer
+
+
 def squared_pairwise_distance():
     def _squared_pairwise_distance(input):
         a, b = input

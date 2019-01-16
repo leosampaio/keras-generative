@@ -35,19 +35,19 @@ def triplet_distances(a, p, n, metric='l2', nn=None):
         return d_p, d_n
 
 
-def triplet_lossfun_creator(margin=1., zdims=256, distance_metric='l2', ttype='normal'):
+def triplet_lossfun_creator(margin=1., zdims=256, distance_metric='l2', balance=1., ttype='normal'):
     def triplet_lossfun(_, y_pred):
 
         m = K.ones((K.shape(y_pred)[0],)) * margin
         zero = K.zeros((K.shape(y_pred)[0],))
-        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         d_p, d_n = triplet_distances(a, p, n, metric=distance_metric)
         if ttype == 'inverted':
             return K.mean(K.maximum(zero, - d_p + d_n))
         elif ttype == 'simplified':
             return K.mean(K.maximum(zero, m - d_p))
         elif ttype == 'normal':
-            return K.mean(K.maximum(zero, m + d_p - d_n))
+            return K.mean(K.maximum(zero, m + d_p - balance*d_n))
 
     return triplet_lossfun
 
@@ -57,7 +57,7 @@ def quadruplet_lossfun_creator(margin=1., zdims=256, distance_metric='l2', ttype
 
         m = K.ones((K.shape(y_pred)[0],)) * margin
         zero = K.zeros((K.shape(y_pred)[0],))
-        a, p, n, nn = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        a, p, n, nn = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2], y_pred[..., 3]
         d_p, d_n, d_nn = triplet_distances(a, p, n, nn=nn, metric=distance_metric)
         if ttype == 'inverted':
             return K.mean(K.maximum(zero, - d_p + d_n) + K.maximum(zero, d_n - d_nn))
@@ -88,7 +88,7 @@ def generic_triplet_lossfun_creator(margin=1., ttype='normal', distance_metric='
 
 def triplet_balance_creator(margin=1., zdims=256, gamma=1., distance_metric='l2'):
     def triplet_balance(_, y_pred):
-        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         d_p, d_n = triplet_distances(a, p, n, metric=distance_metric)
         return - d_p + d_n
 
@@ -97,7 +97,7 @@ def triplet_balance_creator(margin=1., zdims=256, gamma=1., distance_metric='l2'
 
 def triplet_std_creator(margin=1., zdims=256, distance_metric='l2'):
     def triplet_std(_, y_pred):
-        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         d_p, d_n = triplet_distances(a, p, n, metric=distance_metric)
         return K.std(d_p - d_n)
 
@@ -106,7 +106,7 @@ def triplet_std_creator(margin=1., zdims=256, distance_metric='l2'):
 
 def topgan_magan_equilibrium_creator(zdims=256):
     def topgan_magan_equilibrium(_, y_pred):
-        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         return K.sqrt(K.sum(K.square(a - p)))
     return topgan_magan_equilibrium
 
@@ -116,7 +116,7 @@ def eq_triplet_lossfun_creator(margin=1., zdims=256, k=1, simplified=False):
 
         m = margin
         zero = K.constant(0.)
-        a, p, n = [y_pred[..., i:i + zdims] for i in range(0, y_pred.shape[-1], zdims)]
+        a, p, n = y_pred[..., 0], y_pred[..., 1], y_pred[..., 2]
         if simplified:
             return K.maximum(zero, m - k * K.sqrt(K.sum(K.square(a - n))))
         else:
@@ -232,7 +232,7 @@ def ae_lossfun(y_true, y_pred):
     """
     x = y_pred[..., 0]
     x_reconstructed = y_pred[..., 1]
-    ae_loss = K.mean(K.square(x - x_reconstructed))
+    ae_loss = K.mean(K.abs(x - x_reconstructed))
     return ae_loss
 
 
@@ -359,33 +359,34 @@ def con_began_ae_lossfun(y_true, y_pred):
     return con_ae_loss
 
 
-def topgan_began_gen_lossfun(y_true, y_pred):
-    """
-    y_pred[:,0]: (Gx(z))
-    y_pred[:,1]: D(Gx(z))
-    y_pred[:,2]: D(x)
-    y_pred[:,3]: x
-    """
-    x_hat = y_pred[..., 0]
-    x_hat_reconstructed = y_pred[..., 1]
-    ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
-    return ae_loss
+def topgan_began_gen_lossfun_creator():
+    def topgan_began_gen_lossfun(y_true, y_pred):
+        """
+        y_pred[:,0]: (Gx(z))
+        y_pred[:,1]: D(Gx(z))
+        y_pred[:,2]: D(x)
+        y_pred[:,3]: x
+        """
+        x_hat = y_pred[..., 0]
+        x_hat_reconstructed = y_pred[..., 1]
+        ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+        return ae_loss
+    return topgan_began_gen_lossfun
 
 
-def topgan_began_dis_lossfun(y_true, y_pred):
-    """
-    y_pred[:,0]: (Gx(z))
-    y_pred[:,1]: D(Gx(z))
-    y_pred[:,2]: D(x)
-    y_pred[:,3]: x
-    """
-    x_hat = y_pred[..., 0]
-    x_hat_reconstructed = y_pred[..., 1]
-    x_real = y_pred[..., 3]
-    x_real_reconstructed = y_pred[..., 2]
-    # y_pred = K.tf.Print(y_pred, [y_pred.shape])
-    # a = K.tf.Print(a, [a.shape])
-    # p = K.tf.Print(p, [p.shape])
-    fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
-    real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
-    return real_ae_loss - fake_ae_loss
+def topgan_began_dis_lossfun_creator(k_gd_ratio):
+    def topgan_began_dis_lossfun(y_true, y_pred):
+        """
+        y_pred[:,0]: (Gx(z))
+        y_pred[:,1]: D(Gx(z))
+        y_pred[:,2]: D(x)
+        y_pred[:,3]: x
+        """
+        x_hat = y_pred[..., 0]
+        x_hat_reconstructed = y_pred[..., 1]
+        x_real = y_pred[..., 3]
+        x_real_reconstructed = y_pred[..., 2]
+        fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
+        real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
+        return real_ae_loss - k_gd_ratio*fake_ae_loss
+    return topgan_began_dis_lossfun

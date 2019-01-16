@@ -157,21 +157,6 @@ class BaseModel(metaclass=ABCMeta):
                                        losses=self.losses,
                                        elapsed_time=time.time() - start_time)
 
-                # check for collapse scenario where G and D losses are equal
-                did_collapse = self.did_collapse(losses)
-                if did_collapse:
-                    message = "[{}] {}. Stopped at Epoch #{}".format(self.experiment_id, did_collapse, self.current_epoch)
-                    try:
-                        notify_with_message(message, experiment_id=self.experiment_id)
-                    except NameError:
-                        pass
-                    print(message)
-                    exit()
-
-                if self.test_mode:
-                    print('\nFinish testing: %s' % self.experiment_id)
-                    return
-
                 # plot samples and losses and send notification if it's checkpoint time
                 if self.processed_images % self.checkpoint_every < (self.processed_images - self.batchsize) % self.checkpoint_every:
                     self.save_model()

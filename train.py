@@ -61,8 +61,9 @@ def main():
     parser.add_argument('--generator-mining', action='store_true')
     parser.add_argument('--retrofit-embedding', action='store_true')
     parser.add_argument('--tie-loss-weights', action='store_true')
-
-
+    parser.add_argument('--use-uniform-z', action='store_true')
+    parser.add_argument('--use-began-k-to-balance-triplet', action='store_true')
+    parser.add_argument('--multilayer-triplet', action='store_true')
 
     args = parser.parse_args()
 

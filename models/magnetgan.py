@@ -19,7 +19,7 @@ from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
                            generator_lossfun, triplet_balance_creator,
                            eq_triplet_lossfun_creator,
                            triplet_std_creator, generic_triplet_lossfun_creator,
-                           topgan_began_dis_lossfun_creator, 
+                           topgan_began_dis_lossfun_creator,
                            topgan_began_gen_lossfun_creator,
                            ae_lossfun, quadruplet_lossfun_creator)
 
@@ -28,8 +28,8 @@ from .layers import (conv2d, deconv2d, LayerNorm, squared_pairwise_distance,
 from .utils import (set_trainable, smooth_binary_labels)
 
 
-class TOPGANwithAEfromBEGAN(BaseModel):
-    name = 'topgan-ae-began'
+class MagnetGANwithAEfromBEGAN(BaseModel):
+    name = 'magnetgan-began'
 
     def __init__(self,
                  input_shape=(64, 64, 3),
@@ -37,26 +37,10 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                  triplet_margin=1.,
                  n_filters_factor=128,
                  use_began_equilibrium=False,
-                 began_k_lr=1e-3,
-                 use_alignment_layer=False,
-                 began_gamma=1.,
-                 use_simplified_triplet=False,
-                 use_magan_equilibrium=False,
-                 topgan_enforce_std_dev=False,
-                 topgan_use_data_trilet_regularization=False,
-                 use_began_loss=False,
                  use_gradnorm=False,
                  gradnorm_alpha=0.5,
                  distance_metric='l2',
-                 use_sigmoid_triplet=False,
-                 online_mining=None,
-                 online_mining_ratio=1,
-                 use_quadruplet=False,
-                 generator_mining=False,
-                 retrofit_embedding=False,
-                 tie_loss_weights=False,
                  use_uniform_z=False,
-                 use_began_k_to_balance_triplet=False,
                  multilayer_triplet=False,
                  **kwargs):
 
@@ -64,26 +48,12 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                            'g_triplet', 'g_std', 'g_mean']
         self.loss_plot_organization = [('g_loss', 'd_loss'), 'd_triplet',
                                        'g_triplet', ('g_std', 'g_mean')]
-        if use_magan_equilibrium:
-            self.loss_names += ['margin']
-            self.loss_plot_organization += ['margin']
-        if use_alignment_layer or use_began_equilibrium:
-            self.loss_names += ['k']
-            self.loss_plot_organization += ['k']
-        if topgan_use_data_trilet_regularization:
-            self.loss_names += ['data_triplet']
-            self.loss_plot_organization += ['data_triplet']
-        if use_began_loss:
-            self.loss_names += ['began_d', 'began_g', 'k']
-            self.loss_plot_organization += [('began_d', 'began_g'), 'k']
-        else:
-            self.loss_names += ['ae_loss']
-            self.loss_plot_organization += ['ae_loss']
+
+        self.loss_names += ['ae_loss']
+        self.loss_plot_organization += ['ae_loss']
         if use_gradnorm:
             self.loss_names += ['gradnorm']
             self.loss_plot_organization += ['gradnorm']
-
-        self.retrofit_embedding = retrofit_embedding
 
         super().__init__(input_shape=input_shape, **kwargs)
 
@@ -91,35 +61,19 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         self.triplet_margin = K.variable(triplet_margin)
         self.n_filters_factor = n_filters_factor
         self.use_began_equilibrium = use_began_equilibrium
-        self.k_lr = began_k_lr
-        self.use_alignment_layer = use_alignment_layer
-        self.gamma = began_gamma
-        self.use_simplified_triplet = use_simplified_triplet
-        self.use_magan_equilibrium = use_magan_equilibrium
+
         self.did_set_g_triplet_count = 0
-        self.enforce_std_dev = topgan_enforce_std_dev
-        self.use_data_trilet_regularization = topgan_use_data_trilet_regularization
-        self.use_began_loss = use_began_loss
+
         self.use_gradnorm = use_gradnorm
         self.gradnorm_trainer = None
         self.gradnorm_alpha = gradnorm_alpha
         self.distance_metric = distance_metric
-        self.use_sigmoid_triplet = use_sigmoid_triplet
-        self.use_quadruplet = use_quadruplet
-        self.generator_mining = generator_mining
-        self.tie_loss_weights = tie_loss_weights
-        self.use_began_k_to_balance_triplet = use_began_k_to_balance_triplet
 
-        self.online_mining = online_mining
-        self.online_mining_ratio = online_mining_ratio
         self.mining_model = None
         self.use_uniform_z = use_uniform_z
         self.k_gd_ratio = K.variable(0)
         self.multilayer_triplet = multilayer_triplet
         self.triplet_bound_layers = []
-
-        if self.use_magan_equilibrium:
-            self.gamma = 1.
 
         pprint(vars(self))
 
@@ -150,24 +104,20 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         dummy_y = np.expand_dims(y, axis=-1)
         input_data = [x_data, noise, x_permutation, z_latent_dis]
-        label_data = [y, dummy_y, dummy_y, dummy_y, dummy_y, dummy_y, dummy_y]
+        label_data = [y, dummy_y, dummy_y, dummy_y, dummy_y]
 
         # train both networks
         ld = {}  # loss dictionary
-        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'], _, _, _, ld['began_d'] = self.dis_trainer.train_on_batch(input_data, label_data)
-        _, ld['g_loss'], ld['g_triplet'], _, ld['g_mean'], ld['g_std'], ld['data_triplet'], ld['began_g'] = self.gen_trainer.train_on_batch(input_data, label_data)
+        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'], _, _ = self.dis_trainer.train_on_batch(input_data, label_data)
+        _, ld['g_loss'], ld['g_triplet'], _, ld['g_mean'], ld['g_std'] = self.gen_trainer.train_on_batch(input_data, label_data)
 
         if self.use_gradnorm:
             input_data_gn = [x_data, noise, np.expand_dims(x_permutation, axis=-1), z_latent_dis] + label_data + [np.ones(len(y)) for _ in range(len(label_data))]
             ld['gradnorm'] = self.train_gradnorm(net_input=input_data_gn)
-        if self.use_began_loss:
-            # update k
-            ld['k'] = np.clip(K.get_value(self.k_gd_ratio) + self.k_lr * (self.gamma * ld['ae_loss'] - ld['began_g']), 0, 1)
-            K.set_value(self.k_gd_ratio, ld['k'])
 
         return ld
 
-    def build_trainer(self, use_quadruplet=False):
+    def build_trainer(self):
         input_x = Input(shape=self.input_shape)
         input_noise = Input(shape=self.input_shape)
         input_x_perm = Input(shape=(1,), dtype='int64')
@@ -178,49 +128,30 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         x_noisy = clipping_layer(Add()([input_x, input_noise]))
 
         anchor_embedding, q, x_rec = self.f_D(input_x)
-        shuffled_x = Lambda(lambda x: K.gather(x, input_x_perm))(input_x)
         positive_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(anchor_embedding)
         _, _, x_rec_noise = self.f_D(x_noisy)
 
-        if self.retrofit_embedding:
-            p = Lambda(lambda x: K.stop_gradient(x))(positive_embedding)
-            x_hat = self.f_Gx(p)
-        else:
-            x_hat = self.f_Gx(input_z)
+        x_hat = self.f_Gx(input_z)
 
         negative_embedding, p, x_hat_rec = self.f_D(x_hat)
-
-        if self.use_sigmoid_triplet:
-            act = Activation('sigmoid')
-            anchor_embedding, positive_embedding, negative_embedding = act(anchor_embedding), act(positive_embedding), act(negative_embedding)
 
         fix_dim = Reshape((-1, 1))
 
         input = [input_x, input_noise, input_x_perm, input_z]
 
         concatenated_dis = Concatenate(axis=-1, name="dis_classification")([p, q])
-        concatenated_data_triplet = Concatenate(axis=-1, name="data_triplet")(
-            [fix_dim(input_x), fix_dim(shuffled_x), fix_dim(x_hat)])
-        concatenated_began_recons = Concatenate(axis=-1, name="began_ae")(
-            [fix_dim(x_hat), fix_dim(x_hat_rec), fix_dim(x_rec), fix_dim(input_x)])
         concatenated_ae = Concatenate(axis=-1, name="ae")(
             [fix_dim(input_x), fix_dim(x_rec_noise)])
-
-        if not use_quadruplet:
-            triplet = Concatenate(axis=-1, name="triplet")(
-                [fix_dim(anchor_embedding), fix_dim(positive_embedding), fix_dim(negative_embedding)])
-            metric_triplet = triplet
-        else:
-            nn_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(negative_embedding)
-            triplet = Concatenate(axis=-1, name="triplet")(
-                [fix_dim(anchor_embedding), fix_dim(positive_embedding), fix_dim(negative_embedding), fix_dim(nn_embedding)])
-            metric_triplet = Concatenate(axis=-1, name="triplet_metrics")(
-                [fix_dim(anchor_embedding), fix_dim(positive_embedding), fix_dim(negative_embedding)])
+        
+        nn_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(negative_embedding)
+        triplet = Concatenate(axis=-1, name="triplet")(
+            [fix_dim(anchor_embedding), fix_dim(positive_embedding), fix_dim(negative_embedding), fix_dim(nn_embedding)])
+        metric_triplet = Concatenate(axis=-1, name="triplet_metrics")(
+            [fix_dim(anchor_embedding), fix_dim(positive_embedding), fix_dim(negative_embedding)])
 
         output = [concatenated_dis, triplet, concatenated_ae,
-                  metric_triplet, metric_triplet,
-                  concatenated_data_triplet, concatenated_began_recons]
-        return Model(input, output, name='topgan')
+                  metric_triplet, metric_triplet]
+        return Model(input, output, name='magnetgan')
 
     def build_model(self):
 
@@ -232,65 +163,24 @@ class TOPGANwithAEfromBEGAN(BaseModel):
 
         self.optimizers = self.build_optmizers()
         self.k_gd_ratio = K.variable(0)
-        (loss_d, loss_g, triplet_d_loss, triplet_g_loss, t_mean, t_std,
-         x_triplet, began_dis_loss, began_gen_loss) = self.define_loss_functions()
+        (loss_d, loss_g, triplet_d_loss, triplet_g_loss, t_mean, t_std) = self.define_loss_functions()
 
-        if self.enforce_std_dev:
-            std_dev_weight = -0.01
-        else:
-            std_dev_weight = 0.
+        ae_loss_w = self.losses['ae_loss'].backend
 
-        if self.use_data_trilet_regularization:
-            x_triplet_weight = self.losses['data_triplet'].backend
-        else:
-            x_triplet_weight = 0.
-
-        if self.use_began_loss:
-            began_d_loss_w = self.losses['began_d'].backend
-            began_g_loss_w = self.losses['began_g'].backend
-            ae_loss = 0.
-        else:
-            ae_loss = self.losses['ae_loss'].backend
-            began_d_loss_w = 0.
-            began_g_loss_w = 0.
-
-        if self.tie_loss_weights:
-            triplet_g_loss_weight = self.losses['d_triplet'].backend
-            began_g_loss_w = began_d_loss_w
-        else:
-            triplet_g_loss_weight = self.losses['g_triplet'].backend
-
-        if self.online_mining:
-            self.mining_model = self.build_online_mining_model()
-
-        if self.use_alignment_layer:
-            self.alignment_layer.summary()
-            self.alignment_layer_trainer = self.build_trainer()
-            set_trainable(self.f_Gx, False)
-            set_trainable(self.f_D, False)
-            set_trainable(self.alignment_layer, True)
-            self.alignment_layer_trainer.compile(
-                optimizer=self.optimizers["opt_ae"],
-                loss=[loss_d, triplet_d_loss, ae_lossfun, triplet_g_loss, t_std, x_triplet, began_dis_loss],
-                loss_weights=[0, 0, 0, 1.])
-            loss_weights = [self.losses['d_loss'].backend, 0, ae_loss, self.losses['d_triplet'].backend, std_dev_weight, 0., began_d_loss_w]
-            set_trainable(self.alignment_layer, False)
-        else:
-            loss_weights = [self.losses['d_loss'].backend, self.losses['d_triplet'].backend, ae_loss, 0., std_dev_weight, 0., began_d_loss_w]
         self.dis_trainer = self.build_trainer()
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
         self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
-                                 loss=[loss_d, triplet_d_loss, ae_lossfun, triplet_d_loss, t_std, x_triplet, began_dis_loss],
-                                 loss_weights=loss_weights)
+                                 loss=[loss_d, triplet_d_loss, ae_lossfun, triplet_d_loss, t_std],
+                                 loss_weights=[self.losses['d_loss'].backend, self.losses['d_triplet'].backend, ae_loss_w, 0., 0.])
 
         # build generators
-        self.gen_trainer = self.build_trainer(use_quadruplet=self.use_quadruplet)
+        self.gen_trainer = self.build_trainer()
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
         self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
-                                 loss=[loss_g, triplet_g_loss, ae_lossfun, t_mean, t_std, x_triplet, began_gen_loss],
-                                 loss_weights=[self.losses['g_loss'].backend, triplet_g_loss_weight, 0., 0., 0., x_triplet_weight, began_g_loss_w])
+                                 loss=[loss_g, triplet_g_loss, ae_lossfun, t_mean, t_std],
+                                 loss_weights=[self.losses['g_loss'].backend, self.losses['d_triplet'].backend, 0., 0., 0.])
 
         # store trainers
         set_trainable(self.f_Gx, True)
@@ -309,24 +199,12 @@ class TOPGANwithAEfromBEGAN(BaseModel):
                 "opt_gradnorm": opt_gradnorm}
 
     def define_loss_functions(self):
-        if self.use_began_k_to_balance_triplet:
-            triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric, balance=self.k_gd_ratio)
-        elif self.use_began_equilibrium:
-            triplet_d = eq_triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, k=self.k_gd_ratio,
-                                                   simplified=self.use_simplified_triplet, distance_metric=self.distance_metric)
-        else:
-            triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric)
-        if self.use_quadruplet:
-            triplet_g = quadruplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, ttype='inverted', distance_metric=self.distance_metric)
-        else:
-            triplet_g = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, ttype='inverted', distance_metric=self.distance_metric)
+        triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric)
+        triplet_g = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, ttype='inverted', distance_metric=self.distance_metric)
         return (discriminator_lossfun, generator_lossfun,
                 triplet_d, triplet_g,
-                triplet_balance_creator(margin=self.triplet_margin, zdims=self.embedding_size, gamma=K.variable(self.gamma), distance_metric=self.distance_metric),
-                triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric),
-                generic_triplet_lossfun_creator(margin=self.triplet_margin, ttype='inverted', distance_metric=self.distance_metric),
-                topgan_began_dis_lossfun_creator(k_gd_ratio=self.k_gd_ratio),
-                topgan_began_gen_lossfun_creator())
+                triplet_balance_creator(margin=self.triplet_margin, zdims=self.embedding_size, gamma=K.variable(0.5), distance_metric=self.distance_metric),
+                triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric))
 
     """
         # Triplet Mining Formulation and "Training" (actually just running)
@@ -392,7 +270,7 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         elif self.online_mining == 'anchor-cluster':
             a = self.mining_model.predict([x_data, z_latent_dis])
             batchsize = self.batchsize // self.online_mining_ratio
-            kmeans = skcluster.KMeans(n_clusters=batchsize//2, init='random')
+            kmeans = skcluster.KMeans(n_clusters=batchsize // 2, init='random')
             clusassign = kmeans.fit_predict(a)
             X = pd.DataFrame(a)
             min_dist = np.min(cdist(a, kmeans.cluster_centers_, 'euclidean'), axis=1)
@@ -595,11 +473,6 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         else:
             t_embedding = x_embedding
 
-        if self.use_alignment_layer:
-            z_input = Input(shape=(self.embedding_size,))
-            z = Dense(self.embedding_size, use_bias=False)(z_input)
-            self.alignment_layer = Model(z_input, z)
-
         self.d_classifier = self.build_d_classifier()
         discriminator = self.d_classifier(x_embedding)
 
@@ -702,8 +575,8 @@ class TOPGANwithAEfromBEGAN(BaseModel):
         return imgs_from_dataset, x_hat
 
 
-class TOPGANwithAESmall(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-small'
+class MagnetGANwithAESmall(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-small'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -761,8 +634,8 @@ class TOPGANwithAESmall(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAEfromDCGAN(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-dcgan'
+class MagnetGANwithAEfromDCGAN(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-dcgan'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -820,8 +693,8 @@ class TOPGANwithAEfromDCGAN(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAEfromConv(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-conv'
+class MagnetGANwithAEfromConv(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-conv'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -880,8 +753,8 @@ class TOPGANwithAEfromConv(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAESmall2(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-small2'
+class MagnetGANwithAESmall2(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-small2'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -947,8 +820,8 @@ class TOPGANwithAESmall2(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAESmall3(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-small2-bn'
+class MagnetGANwithAESmall3(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-small2-bn'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1018,8 +891,8 @@ class TOPGANwithAESmall3(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAEmlp(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-mlp'
+class MagnetGANwithAEmlp(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-mlp'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1066,8 +939,8 @@ class TOPGANwithAEmlp(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAESmallLN(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-small-ln'
+class MagnetGANwithAESmallLN(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-small-ln'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1127,8 +1000,8 @@ class TOPGANwithAESmallLN(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAEmlpSynth(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-mlp-synth'
+class MagnetGANwithAEmlpSynth(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-mlp-synth'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1177,8 +1050,8 @@ class TOPGANwithAEmlpSynth(TOPGANwithAEfromBEGAN):
         return Model(z_input, x, name='G')
 
 
-class TOPGANwithAEmlpSynthNoReg(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-mlp-synth-noreg'
+class MagnetGANwithAEmlpSynthNoReg(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-mlp-synth-noreg'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1224,8 +1097,8 @@ class TOPGANwithAEmlpSynthNoReg(TOPGANwithAEfromBEGAN):
         return Model(z_input, x, name='G')
 
 
-class TOPGANwithAEmlpSynthNoRegVeegan(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-mlp-synth-veegan'
+class MagnetGANwithAEmlpSynthNoRegVeegan(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-mlp-synth-veegan'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1274,73 +1147,11 @@ class TOPGANwithAEmlpSynthNoRegVeegan(TOPGANwithAEfromBEGAN):
         return Model(z_input, x, name='G')
 
 
-def regfun(x):
-    tmp = K.maximum(0., 1e-6 - K.std(K.batch_flatten(x), axis=0))
-    # tmp = K.tf.Print(tmp, [tmp, K.shape(tmp)], "")
-    return K.mean(tmp)
 
 
-class TOPGANwithAEfromDCGANRegularized(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-dcgan-reg'
 
-    def build_encoder(self):
-        inputs = Input(shape=self.input_shape)
-
-        x = conv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=False, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(inputs)
-        x = conv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(x)
-        x = conv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same')(x)
-        x = conv2d(self.n_filters_factor * 8, (5, 5), strides=(2, 2), bnorm=True, activation='leaky_relu', leaky_relu_slope=0.2, padding='same', reg=regfun)(x)
-
-        x = Flatten()(x)
-        x = Dense(self.embedding_size)(x)
-
-        return Model(inputs, x)
-
-    def build_decoder(self):
-        z_input = Input(shape=(self.embedding_size,))
-        orig_channels = self.input_shape[2]
-
-        w = self.input_shape[0] // 2**4
-
-        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
-        x = Reshape((w, w, self.n_filters_factor * 8))(x)
-        x = BatchNormalization()(x)
-        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-
-        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
-
-        return Model(z_input, x)
-
-    def build_d_classifier(self):
-        embedding_input = Input(shape=(self.embedding_size,))
-
-        x = Dense(1)(embedding_input)
-        x = Activation('sigmoid')(x)
-
-        return Model(embedding_input, x)
-
-    def build_Gx(self):
-        z_input = Input(shape=(self.z_dims,))
-        orig_channels = self.input_shape[2]
-
-        w = self.input_shape[0] // 2**4
-
-        x = Dense(self.n_filters_factor * 8 * w * w)(z_input)
-        x = Reshape((w, w, self.n_filters_factor * 8))(x)
-        x = BatchNormalization()(x)
-        x = deconv2d(self.n_filters_factor * 4, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-        x = deconv2d(self.n_filters_factor * 2, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-        x = deconv2d(self.n_filters_factor, (5, 5), strides=(2, 2), bnorm=True, activation='relu', padding='same')(x)
-
-        x = deconv2d(orig_channels, (5, 5), strides=(2, 2), bnorm=False, activation='sigmoid', padding='same')(x)
-
-        return Model(z_input, x)
-
-
-class TOPGANwithAEfromDCGANnobn(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-dcgan-nobn'
+class MagnetGANwithAEfromDCGANnobn(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-dcgan-nobn'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1396,8 +1207,8 @@ class TOPGANwithAEfromDCGANnobn(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAEmlpSynthTest(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-mlp-synth-test'
+class MagnetGANwithAEmlpSynthTest(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-mlp-synth-test'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1450,8 +1261,8 @@ class TOPGANwithAEmlpSynthTest(TOPGANwithAEfromBEGAN):
         return Model(z_input, x, name='G')
 
 
-class TOPGANwithAETesting(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-testing'
+class MagnetGANwithAETesting(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-testing'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1507,8 +1318,8 @@ class TOPGANwithAETesting(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAETesting2(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-testing2'
+class MagnetGANwithAETesting2(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-testing2'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
@@ -1568,8 +1379,8 @@ class TOPGANwithAETesting2(TOPGANwithAEfromBEGAN):
         return Model(z_input, x)
 
 
-class TOPGANwithAETesting3(TOPGANwithAEfromBEGAN):
-    name = 'topgan-ae-testing3'
+class MagnetGANwithAETesting3(MagnetGANwithAEfromBEGAN):
+    name = 'magnetgan-testing3'
 
     def build_encoder(self):
         inputs = Input(shape=self.input_shape)
