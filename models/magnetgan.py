@@ -15,13 +15,10 @@ from keras.optimizers import Adam, SGD
 from keras import backend as K, regularizers
 
 from core.models import BaseModel
-from core.lossfuns import (triplet_lossfun_creator, discriminator_lossfun,
-                           generator_lossfun, triplet_balance_creator,
-                           eq_triplet_lossfun_creator,
-                           triplet_std_creator, generic_triplet_lossfun_creator,
-                           topgan_began_dis_lossfun_creator,
-                           topgan_began_gen_lossfun_creator,
-                           ae_lossfun, quadruplet_lossfun_creator)
+from core.lossfuns import (discriminator_lossfun, generator_lossfun,
+                           loss_is_output, magnetgan_ae_a, magnetgan_ae_b,
+                           magnetgan_ae_a_dis, magnetgan_ae_b_dis,
+                           magnetgan_ae_a_gen, magnetgan_ae_b_gen)
 
 from .layers import (conv2d, deconv2d, LayerNorm, squared_pairwise_distance,
                      k_largest_indexes, print_tensor_shape, rdeconv, res)
@@ -36,21 +33,31 @@ class MagnetGANwithAEfromBEGAN(BaseModel):
                  embedding_dim=128,
                  triplet_margin=1.,
                  n_filters_factor=128,
-                 use_began_equilibrium=False,
+                 use_began_loss=False,
                  use_gradnorm=False,
                  gradnorm_alpha=0.5,
                  distance_metric='l2',
                  use_uniform_z=False,
                  multilayer_triplet=False,
+                 minibatch_size=32,
+                 n_clusters=10,
+                 n_clusters_to_select=5,
+                 refresh_clusters=5,
+                 magnet_type='normal',
+                 magnet_polarity='real',
                  **kwargs):
 
-        self.loss_names = ['g_loss', 'd_loss', 'd_triplet',
-                           'g_triplet', 'g_std', 'g_mean']
-        self.loss_plot_organization = [('g_loss', 'd_loss'), 'd_triplet',
-                                       'g_triplet', ('g_std', 'g_mean')]
+        self.loss_names = ['g_loss', 'd_loss', 'd_magnet',
+                           'g_magnet']
+        self.loss_plot_organization = [('g_loss', 'd_loss'), 'd_magnet',
+                                       'g_magnet']
 
-        self.loss_names += ['ae_loss']
-        self.loss_plot_organization += ['ae_loss']
+        if use_began_loss:
+            self.loss_names += ['ae_loss', 'ae_fake']
+            self.loss_plot_organization += ['ae_loss', 'ae_fake']
+        else:
+            self.loss_names += ['ae_loss']
+            self.loss_plot_organization += ['ae_loss']
         if use_gradnorm:
             self.loss_names += ['gradnorm']
             self.loss_plot_organization += ['gradnorm']
@@ -60,7 +67,7 @@ class MagnetGANwithAEfromBEGAN(BaseModel):
         self.embedding_size = embedding_dim
         self.triplet_margin = K.variable(triplet_margin)
         self.n_filters_factor = n_filters_factor
-        self.use_began_equilibrium = use_began_equilibrium
+        self.use_began_loss = use_began_loss
 
         self.did_set_g_triplet_count = 0
 
@@ -74,6 +81,12 @@ class MagnetGANwithAEfromBEGAN(BaseModel):
         self.k_gd_ratio = K.variable(0)
         self.multilayer_triplet = multilayer_triplet
         self.triplet_bound_layers = []
+        self.minibatch_size = minibatch_size
+        self.n_clusters = n_clusters
+        self.n_clusters_to_select = n_clusters_to_select
+        self.refresh_clusters_rate = refresh_clusters
+        self.magnet_type = magnet_type
+        self.magnet_polarity = magnet_polarity
 
         pprint(vars(self))
 
@@ -81,77 +94,200 @@ class MagnetGANwithAEfromBEGAN(BaseModel):
 
     def train_on_batch(self, x_data, y_batch=None, compute_grad_norms=False):
 
-        # get real latent variables distribution
-        if self.use_uniform_z:
-            z_latent_dis = np.random.uniform(low=-1.0, high=1.0, size=(self.batchsize, self.z_dims))
-        else:
-            z_latent_dis = np.random.normal(size=(self.batchsize, self.z_dims))
-        x_permutation = np.array(np.random.permutation(self.batchsize), dtype='int64')
+        # break into smaller batches and loop to get representations for entire batch
+        n_data = len(x_data)
+        real_e = np.zeros((n_data, self.embedding_size))
+        fake_e = np.zeros((n_data, self.embedding_size))
+        z_latent = np.zeros((n_data, self.z_dims))
+        for b in range(0, n_data, self.minibatch_size):
+            if self.minibatch_size > n_data - b:
+                continue
+            b_end = b + self.minibatch_size
 
-        if self.mining_model is not None:
-            x_data, z_latent_dis, x_permutation = self.run_triplet_mining(x_data, z_latent_dis)
+            # get embedding for real samples
+            x = x_data[b:b_end, ...]
+            real_e[b:b_end, :] = self.encoder.predict(x)
 
-        batchsize = len(x_data)
+            # get fake samples end their embedding
+            if self.use_uniform_z:
+                z_latent[b:b_end, :] = np.random.uniform(low=-1.0, high=1.0, size=(self.minibatch_size, self.z_dims))
+            else:
+                z_latent[b:b_end, :] = np.random.normal(size=(self.minibatch_size, self.z_dims))
+            z = z_latent[b:b_end, :]
+            fake_e[b:b_end, :] = self.encoder.predict(self.f_Gx.predict(z))
 
-        # perform label smoothing if applicable
-        y_pos, y_neg = smooth_binary_labels(batchsize, self.label_smoothing, one_sided_smoothing=False)
-        y = np.stack((y_neg, y_pos), axis=1)
+        # run k-means on both real and fake representations
+        kmeans_r = skcluster.KMeans(n_clusters=self.n_clusters, init='k-means++')
+        kmeans_f = skcluster.KMeans(n_clusters=self.n_clusters, init='k-means++')
+        clusters_real = kmeans_r.fit_predict(real_e)
+        clusters_fake = kmeans_f.fit_predict(fake_e)
 
-        if self.input_noise > 1e-5:
-            noise = np.random.normal(scale=self.input_noise, size=x_data.shape)
-        else:
-            noise = np.zeros(x_data.shape)
+        # prepare labels for discriminator
+        y_pos, y_neg = smooth_binary_labels(self.minibatch_size, self.label_smoothing, one_sided_smoothing=False)
+        y_d, y_g = {}, {}
+        y_d['r'] = y_pos
+        y_d['f'] = y_neg
+        y_g['r'] = y_neg
+        y_g['f'] = y_pos
+        y_dummy = np.zeros((self.minibatch_size,))
+        y_dummy_ae = np.expand_dims(np.expand_dims(y_dummy, axis=-1), axis=-1)
 
-        dummy_y = np.expand_dims(y, axis=-1)
-        input_data = [x_data, noise, x_permutation, z_latent_dis]
-        label_data = [y, dummy_y, dummy_y, dummy_y, dummy_y]
+        for _ in range(self.refresh_clusters_rate):
 
-        # train both networks
-        ld = {}  # loss dictionary
-        _, ld['d_loss'], ld['d_triplet'], ld['ae_loss'], _, _ = self.dis_trainer.train_on_batch(input_data, label_data)
-        _, ld['g_loss'], ld['g_triplet'], _, ld['g_mean'], ld['g_std'] = self.gen_trainer.train_on_batch(input_data, label_data)
+            ld = {}
+            # select a class and anchor cluster
+            for anchor_is_real in [True, False]:
+                a_cluster = np.random.choice(self.n_clusters)
+                if anchor_is_real:
+                    a_data = x_data
+                    a_labels = clusters_real
+                    n_data = z_latent
+                    n_labels = clusters_fake
+                    a_centers = kmeans_r.cluster_centers_
+                    n_centers = kmeans_f.cluster_centers_
+                    key = 'r'
+                else:
+                    a_data = z_latent
+                    a_labels = clusters_fake
+                    n_data = x_data
+                    n_labels = clusters_real
+                    a_centers = kmeans_f.cluster_centers_
+                    n_centers = kmeans_r.cluster_centers_
+                    key = 'f'
+                a_cls_idx = a_labels == a_cluster
 
-        if self.use_gradnorm:
-            input_data_gn = [x_data, noise, np.expand_dims(x_permutation, axis=-1), z_latent_dis] + label_data + [np.ones(len(y)) for _ in range(len(label_data))]
-            ld['gradnorm'] = self.train_gradnorm(net_input=input_data_gn)
+                # get closest negative clusters (by looking at centers)
+                if self.magnet_polarity == 'real':
+                    sel_n_cls = np.argsort(np.linalg.norm(n_centers - a_centers[a_cluster], axis=1))[-self.n_clusters_to_select:]
+                elif self.magnet_polarity == 'fake':
+                    sel_n_cls = np.argsort(np.linalg.norm(n_centers - a_centers[a_cluster], axis=1))[:self.n_clusters_to_select]
+                elif self.magnet_polarity == 'both':
+                    tmp_sort = np.argsort(np.linalg.norm(n_centers - a_centers[a_cluster], axis=1))
+                    sel_n_cls = np.concatenate((tmp_sort[:self.n_clusters_to_select // 2], tmp_sort[-self.n_clusters_to_select // 2:]))
+
+                # select a minibatch from the anchor and each of the negative clusters
+                a_samples = a_data[a_cls_idx]
+                a_samples = a_samples[np.random.choice(len(a_samples), self.minibatch_size)]
+                n_samples = np.zeros([self.n_clusters_to_select, self.minibatch_size] + list(n_data.shape[1:]))
+                for i, c in enumerate(sel_n_cls):
+                    n_cls_idx = n_labels == c
+                    tmp_samples = n_data[n_cls_idx]
+                    n_samples[i, ...] = tmp_samples[np.random.choice(len(tmp_samples), self.minibatch_size)]
+
+                n_samples = np.moveaxis(n_samples, 1, 0)
+
+                # train both networks
+                ldtemp = {}
+                _, ldtemp['d_magnet'], _, ldtemp['d_loss'], ldtemp['ae_loss'] = self.dis_trainers[key].train_on_batch([a_samples, n_samples], [y_dummy, y_dummy, y_d[key], y_dummy_ae])
+                _, l_, ldtemp['g_magnet'], ldtemp['g_loss'], ldtemp['ae_fake'] = self.gen_trainers[key].train_on_batch([a_samples, n_samples], [y_dummy, y_dummy, y_g[key], y_dummy_ae])
+
+                for k, x in ldtemp.items():
+                    ld[k] = ld.get(k, 0) + x
 
         return ld
 
-    def build_trainer(self):
+    def build_trainer_for_real_anchor(self):
         input_x = Input(shape=self.input_shape)
-        input_noise = Input(shape=self.input_shape)
-        input_x_perm = Input(shape=(1,), dtype='int64')
+        input_z = Input(shape=[self.n_clusters_to_select, self.z_dims])
+
+        # fix the hacked shape
+        n = Lambda(lambda x: K.permute_dimensions(x, (1, 0, 2)))(input_z)
+
+        def generate_for_each_cluster(x):
+            negs = [None] * self.n_clusters_to_select
+            for i, _ in enumerate(negs):
+                negs[i] = self.f_Gx(x[i, :])
+            return Concatenate(axis=0)(negs)
+        n = Lambda(generate_for_each_cluster)(n)
+        a = Lambda(lambda x: x)(input_x)
+
+        return Model([input_x, input_z], [a, n], name='model_real_anchor')
+
+    def build_trainer_for_fake_anchor(self):
         input_z = Input(shape=(self.z_dims,))
+        input_x = Input(shape=[self.n_clusters_to_select] + list(self.input_shape))
 
-        clipping_layer = Lambda(lambda x: K.clip(x, 0., 1.))
+        # fix the hacked shape
+        n = Lambda(lambda x: K.permute_dimensions(x, [1, 0] + list(range(2, len(self.input_shape) + 2))))(input_x)
 
-        x_noisy = clipping_layer(Add()([input_x, input_noise]))
+        # generate images for each z
+        a = self.f_Gx(input_z)
 
-        anchor_embedding, q, x_rec = self.f_D(input_x)
-        positive_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(anchor_embedding)
-        _, _, x_rec_noise = self.f_D(x_noisy)
+        return Model([input_z, input_x], [a, n], name='model_fake_anchor')
 
-        x_hat = self.f_Gx(input_z)
+    def build_magnet_computer(self, input_a, input_n):
 
-        negative_embedding, p, x_hat_rec = self.f_D(x_hat)
+        emb_a, d_a, a_hat = self.f_D(input_a)
+
+        simplified_n = Lambda(lambda x: K.reshape(x, [-1] + list(self.input_shape)))(input_n)
+        emb_n_flat, d_n, n_hat = self.f_D(simplified_n)
+
+        mean_a = Lambda(lambda x: K.mean(x, axis=0))(emb_a)
+        emb_n = Lambda(lambda x: K.reshape(x, [self.n_clusters_to_select, self.minibatch_size, self.embedding_size]))(emb_n_flat)
+        means_n = Lambda(lambda x: K.mean(x, axis=1))(emb_n)
+        # emb_n = printt(emb_n, 'en')
+        # emb_a = printt(emb_a, 'ea')
+
+        # compute variance for each cluster and average them
+        expand_dim = Lambda(lambda x: K.reshape(x, (1,)))
+        var_a = Lambda(lambda x: K.var(x, axis=[0, 1]))(emb_a)
+        var_n = Lambda(lambda x: K.var(x, axis=[1, 2]))(emb_n)
+        variances = Concatenate(axis=0)([expand_dim(var_a), var_n])
+        # variances = printt(variances, 'variances')
+        variance = Lambda(lambda x: K.mean(x, axis=0))(variances)
+
+        alpha = 1
+        # variance = printt(variance, 'variance')
+        # mean_a = printt(mean_a, 'mean_a')
+        # means_n = printt(means_n, 'means_n')
+        numerator = Lambda(lambda x: K.exp(-(1 / (2 * (variance**2))) * K.sum(K.square(x - mean_a), axis=1) - alpha))(emb_a)
+        denominator = Lambda(lambda x: K.sum(K.exp(-(1 / (2 * (variance**2))) * K.sum(K.square(K.expand_dims(x, 1) - K.expand_dims(means_n, 0)), axis=-1)), axis=-1))(emb_a)
+        # numerator = printt(numerator, 'nominator')
+        # denominator = printt(denominator, 'denominator')
+        epsilon = 1e-8
+        magnet = Lambda(lambda x: K.maximum(0., -K.log(x / (denominator + epsilon) + epsilon)))(numerator)
+        if self.magnet_type == 'normal':
+            inverse_magnet = Lambda(lambda x: -K.log(denominator / (x + epsilon) + epsilon))(numerator)
+        elif self.magnet_type == 'denominator':
+            inverse_magnet = Lambda(lambda x: -K.log(x + epsilon))(denominator)
+        elif self.magnet_type == 'negative':
+            inverse_magnet = Lambda(lambda x: K.log(denominator / (x + epsilon) + epsilon))(numerator)
+        elif self.magnet_type == 'contrastive':
+            inverse_magnet = Lambda(lambda x: K.sum(K.square(K.expand_dims(emb_a, 0) - emb_n), axis=[-1, 0]))(emb_a)
 
         fix_dim = Reshape((-1, 1))
+        remove_dim = Reshape((1,))
+        slice_mb = Lambda(lambda x: x[:self.minibatch_size, ...])
+        recons_concat = Concatenate(axis=-1, name="ae")(
+            [fix_dim(input_a), fix_dim(a_hat), fix_dim(slice_mb(simplified_n)), fix_dim(slice_mb(n_hat))])
+        # dis_concat = Concatenate(axis=0, name="dis_classification")([d_a, d_n])
+        # magnet = printt(magnet, 'm')
+        # inverse_magnet = printt(inverse_magnet, 'i')
+        # d_a = printt(d_a, 'd')
+        # recons_concat = printt(recons_concat, 'r')
+        return remove_dim(magnet), remove_dim(inverse_magnet), remove_dim(d_a), recons_concat
 
-        input = [input_x, input_noise, input_x_perm, input_z]
+    def build_trainer(self):
+        a_input_x = Input(shape=self.input_shape, name='a_input_x')
+        a_input_z = Input(shape=[self.n_clusters_to_select, self.z_dims], name='a_input_z')
+        b_input_z = Input(shape=(self.z_dims,), name='b_input_z')
+        b_input_x = Input(shape=[self.n_clusters_to_select] + list(self.input_shape), name='b_input_x')
 
-        concatenated_dis = Concatenate(axis=-1, name="dis_classification")([p, q])
-        concatenated_ae = Concatenate(axis=-1, name="ae")(
-            [fix_dim(input_x), fix_dim(x_rec_noise)])
-        
-        nn_embedding = Lambda(lambda x: K.squeeze(K.gather(x, input_x_perm), 1))(negative_embedding)
-        triplet = Concatenate(axis=-1, name="triplet")(
-            [fix_dim(anchor_embedding), fix_dim(positive_embedding), fix_dim(negative_embedding), fix_dim(nn_embedding)])
-        metric_triplet = Concatenate(axis=-1, name="triplet_metrics")(
-            [fix_dim(anchor_embedding), fix_dim(positive_embedding), fix_dim(negative_embedding)])
+        self.model_for_real_anchor = self.build_trainer_for_real_anchor()
+        self.model_for_fake_anchor = self.build_trainer_for_fake_anchor()
 
-        output = [concatenated_dis, triplet, concatenated_ae,
-                  metric_triplet, metric_triplet]
-        return Model(input, output, name='magnetgan')
+        a_a, a_n = self.model_for_real_anchor([a_input_x, a_input_z])
+        b_a, b_n = self.model_for_fake_anchor([b_input_z, b_input_x])
+
+        a_magnet, a_inv_magnet, a_dis, a_recon = self.build_magnet_computer(a_a, a_n)
+        b_magnet, b_inv_magnet, b_dis, b_recon = self.build_magnet_computer(b_a, b_n)
+
+        model_a = Model([a_input_x, a_input_z], [a_magnet, a_inv_magnet, a_dis, a_recon], name='model_a')
+
+        # we invert the second model magnets so that [0] always trains discriminator
+        model_b = Model([b_input_z, b_input_x], [b_magnet, b_inv_magnet, b_dis, b_recon], name='model_b')
+
+        return model_a, model_b
 
     def build_model(self):
 
@@ -163,30 +299,47 @@ class MagnetGANwithAEfromBEGAN(BaseModel):
 
         self.optimizers = self.build_optmizers()
         self.k_gd_ratio = K.variable(0)
-        (loss_d, loss_g, triplet_d_loss, triplet_g_loss, t_mean, t_std) = self.define_loss_functions()
+        (loss_d, loss_g, out_is_loss, ae_loss_a,
+            ae_loss_b, ae_loss_a_gen, ae_loss_b_gen) = self.define_loss_functions()
 
         ae_loss_w = self.losses['ae_loss'].backend
+        if self.use_began_loss:
+            ae_loss_gen = self.losses['ae_fake'].backend
+        else:
+            ae_loss_gen = 0.
 
-        self.dis_trainer = self.build_trainer()
+        self.dis_trainers = {}
+        self.dis_trainers['r'], self.dis_trainers['f'] = self.build_trainer()
         set_trainable(self.f_Gx, False)
         set_trainable(self.f_D, True)
-        self.dis_trainer.compile(optimizer=self.optimizers["opt_d"],
-                                 loss=[loss_d, triplet_d_loss, ae_lossfun, triplet_d_loss, t_std],
-                                 loss_weights=[self.losses['d_loss'].backend, self.losses['d_triplet'].backend, ae_loss_w, 0., 0.])
+        self.dis_trainers['r'].compile(
+            optimizer=self.optimizers["opt_d"],
+            loss=[out_is_loss, out_is_loss, 'binary_crossentropy', ae_loss_a],
+            loss_weights=[self.losses['d_magnet'].backend, 0., self.losses['d_loss'].backend, ae_loss_w])
+        self.dis_trainers['f'].compile(
+            optimizer=self.optimizers["opt_d"],
+            loss=[out_is_loss, out_is_loss, 'binary_crossentropy', ae_loss_b],
+            loss_weights=[self.losses['d_magnet'].backend, 0., self.losses['d_loss'].backend, ae_loss_w])
 
         # build generators
-        self.gen_trainer = self.build_trainer()
+        self.gen_trainers = {}
+        self.gen_trainers['r'], self.gen_trainers['f'] = self.build_trainer()
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, False)
-        self.gen_trainer.compile(optimizer=self.optimizers["opt_g"],
-                                 loss=[loss_g, triplet_g_loss, ae_lossfun, t_mean, t_std],
-                                 loss_weights=[self.losses['g_loss'].backend, self.losses['d_triplet'].backend, 0., 0., 0.])
+        self.gen_trainers['r'].compile(
+            optimizer=self.optimizers["opt_g"],
+            loss=[out_is_loss, out_is_loss, 'binary_crossentropy', ae_loss_a_gen],
+            loss_weights=[0., self.losses['g_magnet'].backend, self.losses['g_loss'].backend, ae_loss_gen])
+        self.gen_trainers['f'].compile(
+            optimizer=self.optimizers["opt_g"],
+            loss=[out_is_loss, out_is_loss, 'binary_crossentropy', ae_loss_b_gen],
+            loss_weights=[0., self.losses['g_magnet'].backend, self.losses['g_loss'].backend, ae_loss_gen])
 
         # store trainers
         set_trainable(self.f_Gx, True)
         set_trainable(self.f_D, True)
 
-        self.gen_trainer.summary()
+        self.gen_trainers['r'].summary()
 
     def build_optmizers(self):
         opt_d = Adam(lr=self.lr, beta_1=0.5)
@@ -199,97 +352,14 @@ class MagnetGANwithAEfromBEGAN(BaseModel):
                 "opt_gradnorm": opt_gradnorm}
 
     def define_loss_functions(self):
-        triplet_d = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric)
-        triplet_g = triplet_lossfun_creator(margin=self.triplet_margin, zdims=self.embedding_size, ttype='inverted', distance_metric=self.distance_metric)
-        return (discriminator_lossfun, generator_lossfun,
-                triplet_d, triplet_g,
-                triplet_balance_creator(margin=self.triplet_margin, zdims=self.embedding_size, gamma=K.variable(0.5), distance_metric=self.distance_metric),
-                triplet_std_creator(margin=self.triplet_margin, zdims=self.embedding_size, distance_metric=self.distance_metric))
-
-    """
-        # Triplet Mining Formulation and "Training" (actually just running)
-    """
-
-    def build_online_mining_model(self):
-        input_x = Input(shape=self.input_shape)
-        input_z = Input(shape=(self.z_dims,))
-
-        anchor_embedding, _, _ = self.f_D(input_x)
-
-        n = self.batchsize // self.online_mining_ratio
-
-        if self.online_mining in ('pairs-both', 'pairs-negative', 'both', 'negative'):
-            x_hat = self.f_Gx(input_z)
-            negative_embedding, _, _ = self.f_D(x_hat)
-            triplets = self.build_online_mining_model_literature_ver_(anchor_embedding, negative_embedding, n)
-            return Model([input_x, input_z], triplets, name='mined_triplets')
-
-        elif self.online_mining == 'anchor-cluster':
-            return Model([input_x, input_z], anchor_embedding, name='mined_triplets')
-
-    def build_online_mining_model_literature_ver_(self, a, n, batchsize):
-        d_n = squared_pairwise_distance()([a, n])
-        d_p = squared_pairwise_distance()([a, a])
-
-        if self.generator_mining:
-            signal = 1
+        if self.use_began_loss:
+            return (discriminator_lossfun, generator_lossfun,
+                    loss_is_output, magnetgan_ae_a_dis, magnetgan_ae_b_dis,
+                    magnetgan_ae_a_gen, magnetgan_ae_b_gen)
         else:
-            signal = -1
-
-        if self.online_mining in ('pairs-both', 'pairs-negative'):
-
-            # we first mine negative values
-            k_d_n = Lambda(lambda x: k_largest_indexes(k=self.batchsize // self.online_mining_ratio, signal=signal)(x))(d_n)
-
-            # then, for each positive pair, we mine its positive counterpart
-            k_d_p = k_largest_indexes(k=1, idx_dims=1, signal=-signal)(d_p)
-            positive_k_idx = Lambda(lambda x: K.gather(x, k_d_n[:, 0]))(k_d_p)
-
-            triplets = Concatenate(axis=-1, name="aligned_triplet")([k_d_n, positive_k_idx])
-
-        elif self.online_mining in ('both', 'negative'):
-            k_d_a = K.tf.range(0, batchsize)
-            k_d_n = k_largest_indexes(k=1, idx_dims=1, signal=signal)(d_n)[:batchsize]
-            k_d_p = k_largest_indexes(k=1, idx_dims=1, signal=-signal)(d_p)[:batchsize]
-
-            triplets = Concatenate(axis=-1, name="aligned_triplet")([k_d_a, k_d_n, k_d_p])
-        return triplets
-
-    def run_triplet_mining(self, x_data, z_latent_dis):
-        if self.online_mining in ('pairs-both', 'pairs-negative', 'both', 'negative'):
-
-            triplets = self.mining_model.predict([x_data, z_latent_dis], batch_size=self.batchsize // self.online_mining_ratio)
-            x_data = x_data[triplets[:, 0]]
-            z_latent_dis = z_latent_dis[triplets[:, 1]]
-
-            if self.online_mining == 'pairs-negative' or self.online_mining == 'negative':
-                x_permutation = np.array(np.random.permutation(len(x_data)), dtype='int64')
-            elif self.online_mining == 'pairs-both' or self.online_mining == 'both':
-                x_permutation = triplets[:, 2]
-
-        elif self.online_mining == 'anchor-cluster':
-            a = self.mining_model.predict([x_data, z_latent_dis])
-            batchsize = self.batchsize // self.online_mining_ratio
-            kmeans = skcluster.KMeans(n_clusters=batchsize // 2, init='random')
-            clusassign = kmeans.fit_predict(a)
-            X = pd.DataFrame(a)
-            min_dist = np.min(cdist(a, kmeans.cluster_centers_, 'euclidean'), axis=1)
-            # max_dist = np.max(cdist(a, kmeans.cluster_centers_, 'euclidean'), axis=1)
-            Y = pd.DataFrame(min_dist, index=X.index, columns=['centers'])
-            Z = pd.DataFrame(clusassign, index=X.index, columns=['c_id'])
-            PAP = pd.concat([Y, Z], axis=1)
-            grouped = PAP.groupby(['c_id'])
-            idx_min = grouped.idxmin()["centers"].as_matrix()
-            Y = pd.DataFrame(min_dist, index=X.index, columns=['centers'])
-            PAP = pd.concat([Y, Z], axis=1)
-            grouped = PAP.groupby(['c_id'])
-            idx_max = grouped.idxmax()["centers"].as_matrix()
-            idx = np.concatenate((idx_min, idx_max), axis=-1)
-            x_data = x_data[idx]
-            x_permutation = np.array(np.random.permutation(len(x_data)), dtype='int64')
-            z_latent_dis = z_latent_dis[idx]
-
-        return x_data, z_latent_dis, x_permutation
+            return (discriminator_lossfun, generator_lossfun,
+                    loss_is_output, magnetgan_ae_a, magnetgan_ae_b,
+                    magnetgan_ae_a, magnetgan_ae_b)
 
     """
         # GradNorm Formulation and Training
@@ -1145,9 +1215,6 @@ class MagnetGANwithAEmlpSynthNoRegVeegan(MagnetGANwithAEfromBEGAN):
         x = Dense(np.prod(self.input_shape))(x)
 
         return Model(z_input, x, name='G')
-
-
-
 
 
 class MagnetGANwithAEfromDCGANnobn(MagnetGANwithAEfromBEGAN):

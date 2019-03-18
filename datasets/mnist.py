@@ -8,9 +8,7 @@ def load_data(original=False, use_rgb=False):
         x_train = np.pad(x_train, ((0, 0), (2, 2), (2, 2)), 'constant', constant_values=0)
         x_test = np.pad(x_test, ((0, 0), (2, 2), (2, 2)), 'constant', constant_values=0)
     if use_rgb:
-        x_train = 255 - x_train
         x_train = np.stack((x_train,)*3, -1)
-        x_test = 255 - x_test
         x_test = np.stack((x_test,)*3, -1)
     else:
         x_train = (x_train[:, :, :, np.newaxis])

@@ -63,7 +63,13 @@ def main():
     parser.add_argument('--tie-loss-weights', action='store_true')
     parser.add_argument('--use-uniform-z', action='store_true')
     parser.add_argument('--use-began-k-to-balance-triplet', action='store_true')
+    parser.add_argument('--minibatch-size', default=32, type=int)
     parser.add_argument('--multilayer-triplet', action='store_true')
+    parser.add_argument('--n-clusters', default=10, type=int)
+    parser.add_argument('--n-clusters-to-select', default=5, type=int)
+    parser.add_argument('--refresh-clusters', default=5, type=int)
+    parser.add_argument('--magnet-type', default='normal', type=str)
+    parser.add_argument('--magnet-polarity', default='real', type=str)
 
     args = parser.parse_args()
 

@@ -1,6 +1,6 @@
 import keras
 from keras.engine.topology import Layer
-from keras.layers import Conv2D, BatchNormalization, Conv2DTranspose
+from keras.layers import Conv2D, BatchNormalization, Conv2DTranspose, Dense
 from keras.layers import Activation, ELU, LeakyReLU, Dropout, Lambda
 from keras.layers.merge import _Merge
 from keras import backend as K
@@ -57,122 +57,216 @@ def LayerNorm():
     return Lambda(lambda x: K.tf.contrib.layers.layer_norm(x))
 
 
-def BasicConvLayer(filters,
-                   kernel_size=(5, 5),
-                   padding='same',
-                   strides=(1, 1),
-                   bnorm=False,
-                   lnorm=False,
-                   dropout=0.0,
-                   activation='leaky_relu',
-                   leaky_relu_slope=0.1,
-                   residual=None, k_constraint=None,
-                   reg=None):
+class dense(object):
 
-    kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
-    bias_init = keras.initializers.Zeros()
-    conv = Conv2D(filters=filters,
-                  kernel_size=kernel_size,
-                  strides=strides,
-                  kernel_initializer=kernel_init,
-                  bias_initializer=bias_init,
-                  padding=padding,
-                  kernel_constraint=k_constraint,
-                  activity_regularizer=reg)
-    bn = BatchNormalization()
-    ln = LayerNorm()
+    def __init__(self, units,
+                 bnorm=False,
+                 lnorm=False,
+                 dropout=0.0,
+                 activation='leaky_relu',
+                 leaky_relu_slope=0.1,
+                 residual=None, k_constraint=None,
+                 reg=None):
 
-    def fun(inputs):
+        self.kernel_init = 'glorot_uniform'
+        self.bias_init = 'glorot_uniform'
+        self.layer = Dense(units=units,
+                           kernel_initializer=self.kernel_init,
+                           bias_initializer=self.bias_init,
+                           kernel_constraint=k_constraint,
+                           activity_regularizer=reg)
+        self.bn = BatchNormalization()
+        self.ln = LayerNorm()
+        self.residual = residual
+        self.bnorm = bnorm
+        self.lnorm = lnorm
+        self.activation = activation
+        self.dropout = dropout
 
-        x = conv(inputs)
+    def fun(self, inputs):
 
-        if residual is not None:
-            x = keras.layers.Add()([x, residual])
+        x = self.layer(inputs)
 
-        if bnorm:
-            x = bn(x)
-        elif lnorm:
-            x = ln(x)
+        if self.residual is not None:
+            x = keras.layers.Add()([x, self.residual])
 
-        if activation == 'leaky_relu':
-            x = LeakyReLU(leaky_relu_slope)(x)
-        elif activation == 'elu':
+        if self.bnorm:
+            x = self.bn(x)
+        elif self.lnorm:
+            x = self.ln(x)
+
+        if self.activation == 'leaky_relu':
+            x = LeakyReLU(self.leaky_relu_slope)(x)
+        elif self.activation == 'elu':
             x = ELU()(x)
-        elif activation is not None:
-            x = Activation(activation)(x)
+        elif self.activation is not None:
+            x = Activation(self.activation)(x)
 
-        if dropout > 0.0:
-            x = Dropout(dropout)(x)
+        if self.dropout > 0.0:
+            x = Dropout(self.dropout)(x)
 
         return x
 
-    return fun
+    def add_to_kernel(self, additive):
+        self.layer.kernel = self.layer.kernel + additive
+
+    def add_to_bias(self, additive):
+        self.layer.bias = self.layer.bias + additive
+
+    def get_gradients(self, loss):
+        return K.gradients(loss, self.layer.kernel)[0], K.gradients(loss, self.layer.bias)[0]
+
+    def __call__(self, inputs):
+        return self.fun(inputs)
 
 
-conv2d = BasicConvLayer
+class conv2d(object):
 
+    def __init__(self, filters,
+                 kernel_size=(5, 5),
+                 padding='same',
+                 strides=(1, 1),
+                 bnorm=False,
+                 lnorm=False,
+                 dropout=0.0,
+                 activation='leaky_relu',
+                 leaky_relu_slope=0.1,
+                 residual=None, k_constraint=None,
+                 reg=None):
 
-def BasicDeconvLayer(filters,
-                     kernel_size=(5, 5),
-                     padding='valid',
-                     strides=(1, 1),
-                     bnorm=False,
-                     lnorm=False,
-                     dropout=0.0,
-                     activation='leaky_relu',
-                     leaky_relu_slope=0.1,
-                     residual=None):
+        self.kernel_init = 'glorot_uniform'
+        self.bias_init = 'glorot_uniform'
+        self.layer = Conv2D(filters=filters,
+                            kernel_size=kernel_size,
+                            strides=strides,
+                            kernel_initializer=self.kernel_init,
+                            bias_initializer=self.bias_init,
+                            padding=padding,
+                            kernel_constraint=k_constraint,
+                            activity_regularizer=reg)
+        self.bn = BatchNormalization()
+        self.ln = LayerNorm()
+        self.residual = residual
+        self.bnorm = bnorm
+        self.lnorm = lnorm
+        self.activation = activation
+        self.dropout = dropout
 
-    kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
-    bias_init = keras.initializers.Zeros()
-    conv = Conv2DTranspose(filters=filters,
-                           kernel_size=kernel_size,
-                           strides=strides,
-                           kernel_initializer=kernel_init,
-                           bias_initializer=bias_init,
-                           padding=padding)
-    bn = BatchNormalization()
-    ln = LayerNorm()
+    def fun(self, inputs):
 
-    def fun(inputs):
+        x = self.layer(inputs)
 
-        x = conv(inputs)
+        if self.residual is not None:
+            x = keras.layers.Add()([x, self.residual])
 
-        if residual is not None:
-            x = keras.layers.Add()([x, residual])
+        if self.bnorm:
+            x = self.bn(x)
+        elif self.lnorm:
+            x = self.ln(x)
 
-        if bnorm:
-            x = bn(x)
-        elif lnorm:
-            x = ln(x)
-
-        if activation == 'leaky_relu':
-            x = LeakyReLU(leaky_relu_slope)(x)
-        elif activation == 'elu':
+        if self.activation == 'leaky_relu':
+            x = LeakyReLU(self.leaky_relu_slope)(x)
+        elif self.activation == 'elu':
             x = ELU()(x)
-        elif activation is not None:
-            x = Activation(activation)(x)
+        elif self.activation is not None:
+            x = Activation(self.activation)(x)
 
-        if dropout > 0.0:
-            x = Dropout(dropout)(x)
+        if self.dropout > 0.0:
+            x = Dropout(self.dropout)(x)
 
         return x
 
-    return fun
+    def add_to_kernel(self, additive):
+        self.layer.kernel = self.layer.kernel + additive
+
+    def add_to_bias(self, additive):
+        self.layer.bias = self.layer.bias + additive
+
+    def get_gradients(self, loss):
+        return K.gradients(loss, self.layer.kernel)[0], K.gradients(loss, self.layer.bias)[0]
+
+    def __call__(self, inputs):
+        return self.fun(inputs)
 
 
-deconv2d = BasicDeconvLayer
+class deconv2d(object):
+
+    def __init__(self, filters,
+                 kernel_size=(5, 5),
+                 padding='same',
+                 strides=(1, 1),
+                 bnorm=False,
+                 lnorm=False,
+                 dropout=0.0,
+                 activation='leaky_relu',
+                 leaky_relu_slope=0.1,
+                 residual=None, k_constraint=None,
+                 reg=None):
+
+        self.kernel_init = 'glorot_uniform'
+        self.bias_init = 'glorot_uniform'
+        self.layer = Conv2DTranspose(filters=filters,
+                                     kernel_size=kernel_size,
+                                     strides=strides,
+                                     kernel_initializer=self.kernel_init,
+                                     bias_initializer=self.bias_init,
+                                     padding=padding,
+                                     kernel_constraint=k_constraint,
+                                     activity_regularizer=reg)
+        self.bn = BatchNormalization()
+        self.ln = LayerNorm()
+        self.residual = residual
+        self.bnorm = bnorm
+        self.lnorm = lnorm
+        self.activation = activation
+        self.dropout = dropout
+
+    def fun(self, inputs):
+
+        x = self.layer(inputs)
+
+        if self.residual is not None:
+            x = keras.layers.Add()([x, self.residual])
+
+        if self.bnorm:
+            x = self.bn(x)
+        elif self.lnorm:
+            x = self.ln(x)
+
+        if self.activation == 'leaky_relu':
+            x = LeakyReLU(self.leaky_relu_slope)(x)
+        elif self.activation == 'elu':
+            x = ELU()(x)
+        elif self.activation is not None:
+            x = Activation(self.activation)(x)
+
+        if self.dropout > 0.0:
+            x = Dropout(self.dropout)(x)
+
+        return x
+
+    def add_to_kernel(self, additive):
+        self.layer.kernel = self.layer.kernel + additive
+
+    def add_to_bias(self, additive):
+        self.layer.bias = self.layer.bias + additive
+
+    def get_gradients(self, loss):
+        return K.gradients(loss, self.layer.kernel)[0], K.gradients(loss, self.layer.bias)[0]
+
+    def __call__(self, inputs):
+        return self.fun(inputs)
 
 
-def ResLayer(filters,
-             kernel_size=(5, 5),
-             padding='same',
-             strides=(1, 1),
-             bnorm=True,
-             dropout=0.0,
-             activation='leaky_relu',
-             leaky_relu_slope=0.1,
-             residual=None):
+def res(filters,
+        kernel_size=(5, 5),
+        padding='same',
+        strides=(1, 1),
+        bnorm=True,
+        dropout=0.0,
+        activation='leaky_relu',
+        leaky_relu_slope=0.1,
+        residual=None):
 
     kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
     bias_init = keras.initializers.Zeros()
@@ -205,23 +299,20 @@ def ResLayer(filters,
     return fun
 
 
-res = ResLayer
-
-
-def ResDeconvLayer(filters,
-                   kernel_size=(5, 5),
-                   padding='valid',
-                   strides=(1, 1),
-                   bnorm=True,
-                   dropout=0.0,
-                   activation='leaky_relu',
-                   leaky_relu_slope=0.1,
-                   residual=None):
+def rdeconv(filters,
+            kernel_size=(5, 5),
+            padding='valid',
+            strides=(1, 1),
+            bnorm=True,
+            dropout=0.0,
+            activation='leaky_relu',
+            leaky_relu_slope=0.1,
+            residual=None):
 
     kernel_init = keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
     bias_init = keras.initializers.Zeros()
-    conv = BasicDeconvLayer(filters, kernel_size=kernel_size, padding=padding, strides=strides, bnorm=bnorm,
-                            dropout=dropout, activation=activation, leaky_relu_slope=leaky_relu_slope, residual=residual)
+    conv = deconv2d(filters, kernel_size=kernel_size, padding=padding, strides=strides, bnorm=bnorm,
+                    dropout=dropout, activation=activation, leaky_relu_slope=leaky_relu_slope, residual=residual)
     resconv = Conv2DTranspose(filters=filters,
                               kernel_size=kernel_size,
                               strides=strides,
@@ -247,9 +338,6 @@ def ResDeconvLayer(filters,
         return x
 
     return fun
-
-
-rdeconv = ResDeconvLayer
 
 
 def squared_pairwise_distance():
@@ -445,3 +533,10 @@ class MaximumMeanDiscrepancy(Layer):
 
     def compute_mask(self, inputs, mask=None):
         return [None, None]
+
+
+# legacy
+BasicConvLayer = conv2d
+BasicDeconvLayer = deconv2d
+ResLayer = res
+ResDeconvLayer = rdeconv

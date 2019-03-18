@@ -19,9 +19,17 @@ import keras
 
 class Dataset(object):
 
-    def __init__(self, name):
+    def __init__(self, name, x=None, y=None, attr_names=None, x_test=None, y_test=None, make_validation_set=False):
         self.name = name
-        self.images = None
+        self.images = x
+        self.attrs = y
+        self.attr_names = attr_names
+        self.x_test = x_test
+        self.y_test = y_test
+        self.make_validation_set = make_validation_set
+
+        if self.make_validation_set:
+            self.build_validation_set()
 
     def __len__(self):
         return len(self.images)
@@ -30,6 +38,15 @@ class Dataset(object):
         return self.images.shape
 
     shape = property(_get_shape)
+
+    def build_validation_set(self):
+        n = int(len(self.images) * self.make_validation_set)
+        np.random.seed(14)
+        perm = np.random.permutation(len(self.images))
+        x_data = self.images[perm[:n]]
+        y_data = np.argmax(self.attrs[perm[:n]], axis=1)
+        np.random.seed()
+        self.validation_set = (x_data, y_data)
 
     def get_random_fixed_batch(self, n=32):
         np.random.seed(14)
@@ -72,10 +89,8 @@ class Dataset(object):
 
 class ConditionalDataset(Dataset):
 
-    def __init__(self, name):
-        super(ConditionalDataset, self).__init__(name)
-        self.attrs = None
-        self.attr_names = None
+    def __init__(self, name, x=None, y=None, attr_names=None, x_test=None, y_test=None, make_validation_set=False):
+        super(ConditionalDataset, self).__init__(name, x, y, attr_names, x_test, y_test, make_validation_set)
 
     def get_random_fixed_batch(self, n=32):
         if len(self.attrs.shape) == 2:
@@ -91,17 +106,86 @@ class ConditionalDataset(Dataset):
 
         return x_data, y_data
 
-    def generator(self, batchsize):
+    def build_validation_set(self):
+        n = int(len(self.images) * self.make_validation_set)
+        did_change_y = False
+        if len(self.attrs.shape) == 2:
+            did_change_y = True
+            y_categorical = np.argmax(self.attrs, axis=1)
+        else:
+            y_categorical = self.attrs
+        x, xv, y, yv = sk.model_selection.train_test_split(self.images,
+                                                           y_categorical,
+                                                           stratify=y_categorical,
+                                                           test_size=n,
+                                                           random_state=14)
+        if did_change_y:
+            y = keras.utils.to_categorical(y)
+        self.images, self.attrs = x, y
+        self.validation_set = (xv, yv)
+
+    def generator(self, batchsize, use_set='train'):
+        if use_set == 'train':
+            x, y = self.images, self.attrs
+            should_stop = True
+        elif use_set == 'validation':
+            x, y = self.validation_set
+            should_stop = False  # shorter generator should run forever
         general_cursor = 0
-        n_data = len(self.images)
+        n_data = len(x)
         perm = np.random.permutation(n_data)
-        for b in range(0, n_data, batchsize):
-            if batchsize > n_data - b:
-                continue
-            general_cursor += batchsize
-            indx = perm[b:b + batchsize]
-            x_data, y_data = self.images[indx], self.attrs[indx]
-            yield x_data, y_data, general_cursor
+        while True:
+            for b in range(0, n_data, batchsize):
+                if batchsize > n_data - b:
+                    continue
+                general_cursor += batchsize
+                indx = perm[b:b + batchsize]
+                x_data, y_data = x[indx], y[indx]
+                yield x_data, y_data, general_cursor
+            if should_stop:
+                break
+
+
+class MultiDomainDataset(Dataset):
+
+    def __init__(self, name, datasets):
+        super().__init__(name)
+        self.datasets = datasets
+
+    def __len__(self):
+        return len(self.datasets[0].images)
+
+    def _get_shape(self):
+        return self.datasets[0].images.shape
+
+    shape = property(_get_shape)
+
+    def get_random_fixed_batch(self, n=32):
+        return [ds.get_random_fixed_batch(n) for ds in self.datasets]
+
+    def generator(self, batchsize):
+        generators_list = [ds.generator(batchsize, use_set='train') for ds in self.datasets]
+        generators_list += [ds.generator(batchsize, use_set='validation') for ds in self.datasets]
+        for data in zip(*generators_list):
+            x_data, y_data, cursors = [], [], []
+            for d in data:
+                a, b, c = d
+                x_data.append(a)
+                y_data.append(b)
+                cursors.append(c)
+            yield x_data, y_data, cursors[0]
+
+    def get_test_set(self):
+        if hasattr(self, 'x_test') and hasattr(self, 'y_test'):
+            return self.x_test, self.y_test
+        else:
+            raise KeyError("This dataset does not have a test set")
+
+    def get_random_perm_of_test_set(self, n):
+        return [ds.get_random_perm_of_test_set(n) for ds in self.datasets]
+
+    def has_test_set(self):
+        return hasattr(self, 'x_test')
 
 
 class StackedDataset(Dataset):
@@ -118,7 +202,7 @@ class StackedDataset(Dataset):
         perm3 = np.random.permutation(len(self.images))
         x_data = np.concatenate([self.images[perm[:n]], self.images[perm2[:n]], self.images[perm3[:n]]], axis=-1)
         y_data = np.vstack((np.argmax(self.attrs[perm[:n]], axis=1), np.argmax(self.attrs[perm2[:n]], axis=1), np.argmax(self.attrs[perm3[:n]], axis=1)))
-        y_data = np.sum(y_data*np.transpose([[100, 10, 1]]), axis=0)
+        y_data = np.sum(y_data * np.transpose([[100, 10, 1]]), axis=0)
         np.random.seed()
         return x_data, y_data
 
@@ -132,7 +216,7 @@ class StackedDataset(Dataset):
             np.random.seed()
             x_test = np.concatenate((self.x_test, self.x_test[perm], self.x_test[perm2]), axis=-1)
             y_test = np.argmax(self.y_test, axis=1)
-            y_test = np.sum((y_test*100, y_test[perm]*10, y_test[perm2]), axis=0)
+            y_test = np.sum((y_test * 100, y_test[perm] * 10, y_test[perm2]), axis=0)
             return x_test, self.y_test
         else:
             raise KeyError("This dataset does not have a test set")
@@ -142,9 +226,9 @@ class StackedDataset(Dataset):
             np.random.seed(14)
             perm = np.random.permutation(len(self.x_test))
             np.random.seed()
-            x_data = np.concatenate([self.x_test[perm[:(n*3)]][i:i+n] for i in range(0, n*3, n)], axis=-1)
-            y_data = [self.y_test[perm[:(n*3)]][i:i+n] for i in range(0, n*3, n)]
-            y_data = np.sum(y_data*np.transpose([[100, 10, 1]]), axis=0)
+            x_data = np.concatenate([self.x_test[perm[:(n * 3)]][i:i + n] for i in range(0, n * 3, n)], axis=-1)
+            y_data = [self.y_test[perm[:(n * 3)]][i:i + n] for i in range(0, n * 3, n)]
+            y_data = np.sum(y_data * np.transpose([[100, 10, 1]]), axis=0)
             return x_data, y_data
         else:
             raise KeyError("This dataset does not have a test set")
@@ -157,23 +241,23 @@ class StackedDataset(Dataset):
         perm = np.random.permutation(len(self.images))
         n_data = len(self.images)
         for b in range(0, n_data, batchsize):
-            if batchsize*3 > n_data - b:
+            if batchsize * 3 > n_data - b:
                 continue
             general_cursor += batchsize
             indx = perm[b:b + batchsize]
-            indx2 = perm[b + batchsize:(b + batchsize*2)%n_data]
-            indx3 = perm[(b + batchsize*2)%n_data:(b + batchsize*3)%n_data]
+            indx2 = perm[b + batchsize:(b + batchsize * 2) % n_data]
+            indx3 = perm[(b + batchsize * 2) % n_data:(b + batchsize * 3) % n_data]
             x_data = np.concatenate((self.images[indx], self.images[indx2], self.images[indx3]), axis=-1)
             y_data = np.vstack((np.argmax(self.attrs[indx], axis=1), np.argmax(self.attrs[indx2], axis=1), np.argmax(self.attrs[indx3], axis=1)))
-            y_data = np.sum(y_data*np.transpose([[100, 10, 1]]), axis=0)
+            y_data = np.sum(y_data * np.transpose([[100, 10, 1]]), axis=0)
             y_data = keras.utils.to_categorical(y_data, num_classes=1000)
             yield x_data, y_data, general_cursor
 
 
 class SimulatedAnomalyDetectionDataset(Dataset):
 
-    def __init__(self, name, x, y, anomaly_class=0, test_set=None):
-        super().__init__(name)
+    def __init__(self, name, x, y, anomaly_class, test_set, attr_names, x_test, y_test, make_validation_set=False):
+        super().__init__(name, x, y, attr_names, x_test, y_test, make_validation_set)
         self.full_set = x
         self.y = y
 
@@ -225,7 +309,7 @@ class SimulatedAnomalyDetectionDataset(Dataset):
 
 class CrossDomainDatasets(object):
 
-    def __init__(self, name, anchor_dataset, mirror_dataset):
+    def __init__(self, name, anchor_dataset, mirror_dataset, x=None, y=None, attr_names=None, x_test=None, y_test=None, make_validation_set=False):
         self.name = name
         assert len(anchor_dataset.attr_names) == len(mirror_dataset.attr_names)
         self.anchor = anchor_dataset
@@ -518,32 +602,34 @@ class LargeDataset(object):
     shape = property(_get_shape)
 
 
-def load_dataset(dataset_name):
+def load_dataset(dataset_name, make_validation_set=False):
     if dataset_name == 'mnist':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data()
+
+        x, y, x_test, y_test, attr_names = mnist.load_data()
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'stacked-mnist':
+        x, y, x_test, y_test, attr_names = mnist.load_data()
         dataset = StackedDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data()
     elif dataset_name == 'mnist-original':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data(original=True)
+
+        x, y, x_test, y_test, attr_names = mnist.load_data(original=True)
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'mnist-rgb':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = mnist.load_data(use_rgb=True)
+        x, y, x_test, y_test, attr_names = mnist.load_data(use_rgb=True)
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'svhn':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = svhn.load_data()
+        x, y, x_test, y_test, attr_names = svhn.load_data()
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'svhn-extra':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = svhn.load_data(include_extra=True)
+        x, y, x_test, y_test, attr_names = svhn.load_data(include_extra=True)
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'mnist-svhn':
         anchor = load_dataset('mnist-rgb')
         mirror = load_dataset('svhn')
         dataset = CrossDomainDatasets(dataset_name.replace('-', ''), anchor, mirror)
     elif dataset_name == 'cifar10':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.x_test, dataset.y_test, dataset.attr_names = cifar10.load_data()
+        x, y, x_test, y_test, attr_names = cifar10.load_data()
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'moving-mnist':
         data = moving_mnist.load_data()
         dataset = TimeCorelatedDataset(dataset_name.replace('-', ''), data)
@@ -563,14 +649,14 @@ def load_dataset(dataset_name):
         datapath = celeba.load_data(image_size=64, center_crop=True)
         dataset = LargeDataset(datapath, buffer_size=20000, name=dataset_name)
     elif dataset_name == 'synthetic-8ring':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="ring", n=8, std=.05, r=1, density=5000)
+        x, y, attr_names = mixture.load_data(type="ring", n=8, std=.05, r=1, density=5000)
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, make_validation_set=make_validation_set)
     elif dataset_name == 'synthetic-25grid':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="grid", n=25, std=.05, density=2500)
+        x, y, attr_names = mixture.load_data(type="grid", n=25, std=.05, density=2500)
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, make_validation_set=make_validation_set)
     elif dataset_name == 'synthetic-high-dim':
-        dataset = ConditionalDataset(name=dataset_name.replace('-', ''))
-        dataset.images, dataset.attrs, dataset.attr_names = mixture.load_data(type="high-dim", n=10, d=1200, std=1., density=5000)
+        x, y, attr_names = mixture.load_data(type="high-dim", n=10, d=1200, std=1., density=5000)
+        dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, make_validation_set=make_validation_set)
     elif dataset_name == 'mnist-anomaly':
         x, y, x_t, y_t, y_names = mnist.load_data()
         dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),
@@ -583,6 +669,10 @@ def load_dataset(dataset_name):
         x, y, x_t, y_t, y_names = cifar10.load_data()
         dataset = SimulatedAnomalyDetectionDataset(dataset_name.replace('-', ''),
                                                    x, y, anomaly_class=0, test_set=(x_t, y_t))
+    elif dataset_name == 'md-svhn-mnist':
+        a = load_dataset('mnist-rgb', make_validation_set=0.1)
+        b = load_dataset('svhn', make_validation_set=0.1)
+        dataset = MultiDomainDataset(name=dataset_name.replace('-', ''), datasets=[a, b])
     else:
         raise KeyError("Dataset not implemented")
 

@@ -1,4 +1,5 @@
 from keras import backend as K
+from keras.layers import Lambda
 import numpy as np
 
 
@@ -47,7 +48,7 @@ def triplet_lossfun_creator(margin=1., zdims=256, distance_metric='l2', balance=
         elif ttype == 'simplified':
             return K.mean(K.maximum(zero, m - d_p))
         elif ttype == 'normal':
-            return K.mean(K.maximum(zero, m + d_p - balance*d_n))
+            return K.mean(K.maximum(zero, m + d_p - balance * d_n))
 
     return triplet_lossfun
 
@@ -388,5 +389,101 @@ def topgan_began_dis_lossfun_creator(k_gd_ratio):
         x_real_reconstructed = y_pred[..., 2]
         fake_ae_loss = K.mean(K.abs(x_hat - x_hat_reconstructed))
         real_ae_loss = K.mean(K.abs(x_real - x_real_reconstructed))
-        return real_ae_loss - k_gd_ratio*fake_ae_loss
+        return real_ae_loss - k_gd_ratio * fake_ae_loss
     return topgan_began_dis_lossfun
+
+
+def loss_is_output(y_true, y_pred):
+    return y_pred
+
+
+def magnetgan_ae_a(y_true, y_pred):
+    """
+    y_pred[:,0]: a
+    y_pred[:,1]: D(a)
+    y_pred[:,2]: b
+    y_pred[:,3]: D(b)
+    """
+    a = y_pred[..., 0]
+    a_reconstructed = y_pred[..., 1]
+    a_ae_loss = K.mean(K.abs(a - a_reconstructed))
+    return a_ae_loss
+
+
+def magnetgan_ae_b(y_true, y_pred):
+    """
+    y_pred[:,0]: a
+    y_pred[:,1]: D(a)
+    y_pred[:,2]: b
+    y_pred[:,3]: D(b)
+    """
+    b = y_pred[..., 2]
+    b_reconstructed = y_pred[..., 3]
+    b_ae_loss = K.mean(K.abs(b - b_reconstructed))
+    return b_ae_loss
+
+
+def magnetgan_ae_a_gen(y_true, y_pred):
+    """
+    y_pred[:,0]: a
+    y_pred[:,1]: D(a)
+    y_pred[:,2]: b
+    y_pred[:,3]: D(b)
+    """
+    b = y_pred[..., 2]
+    b_reconstructed = y_pred[..., 3]
+    b_ae_loss = K.mean(K.abs(b - b_reconstructed))
+    return b_ae_loss
+
+
+def magnetgan_ae_b_gen(y_true, y_pred):
+    """
+    y_pred[:,0]: a
+    y_pred[:,1]: D(a)
+    y_pred[:,2]: b
+    y_pred[:,3]: D(b)
+    """
+    a = y_pred[..., 0]
+    a_reconstructed = y_pred[..., 1]
+    a_ae_loss = K.mean(K.abs(a - a_reconstructed))
+    return a_ae_loss
+
+
+def magnetgan_ae_a_dis(y_true, y_pred):
+    """
+    y_pred[:,0]: a
+    y_pred[:,1]: D(a)
+    y_pred[:,2]: b
+    y_pred[:,3]: D(b)
+    """
+    a = y_pred[..., 0]
+    a_reconstructed = y_pred[..., 1]
+    a_ae_loss = K.mean(K.abs(a - a_reconstructed))
+    b = y_pred[..., 2]
+    b_reconstructed = y_pred[..., 3]
+    b_ae_loss = K.mean(K.abs(b - b_reconstructed))
+    return a_ae_loss
+
+
+def magnetgan_ae_b_dis(y_true, y_pred):
+    """
+    y_pred[:,0]: a
+    y_pred[:,1]: D(a)
+    y_pred[:,2]: b
+    y_pred[:,3]: D(b)
+    """
+    a = y_pred[..., 0]
+    a_reconstructed = y_pred[..., 1]
+    a_ae_loss = K.mean(K.abs(a - a_reconstructed))
+    b = y_pred[..., 2]
+    b_reconstructed = y_pred[..., 3]
+    b_ae_loss = K.mean(K.abs(b - b_reconstructed))
+    return b_ae_loss
+
+
+def MSELayer():
+    def f(input_data):
+        a, b = input_data
+        return K.expand_dims(K.mean(K.square(a - b)))
+
+    return Lambda(f)

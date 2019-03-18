@@ -193,8 +193,8 @@ def plot_metrics(outfile, metrics_list, iterations_list, types,
 
             # hack to make toy sets look pretty
             orig_set_idx = category_labels == -1
-            ax.set_xlim([np.min(metric[orig_set_idx, 0])-.5, np.max(metric[orig_set_idx, 0])+.5])
-            ax.set_ylim([np.min(metric[orig_set_idx, 1])-.5, np.max(metric[orig_set_idx, 1])+.5])
+            ax.set_xlim([np.min(metric[orig_set_idx, 0]) - .5, np.max(metric[orig_set_idx, 0]) + .5])
+            ax.set_ylim([np.min(metric[orig_set_idx, 1]) - .5, np.max(metric[orig_set_idx, 1]) + .5])
 
             lines = ax.scatter(metric[~orig_set_idx, 0], metric[~orig_set_idx, 1],
                                color=mapped_colors[~orig_set_idx],
