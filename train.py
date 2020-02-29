@@ -70,6 +70,15 @@ def main():
     parser.add_argument('--refresh-clusters', default=5, type=int)
     parser.add_argument('--magnet-type', default='normal', type=str)
     parser.add_argument('--magnet-polarity', default='real', type=str)
+    parser.add_argument('--disentangled-embedding', action='store_true')
+    parser.add_argument('--use-single-decoder', action='store_true')
+    parser.add_argument('--cycle-consistency-type', default='data', choices=['data', 'representation'], type=str)
+    parser.add_argument('--autoencoder-type', default='classic', choices=['classic', 'variational'], type=str)
+    parser.add_argument('--disentangled-embedding-type', default='equal', choices=['full-half-half', 'equal'], type=str)
+    parser.add_argument('--feature-critic-coverage', default='full', choices=['full', 'general', 'specific'], type=str)
+    parser.add_argument('--cycle-consistency-coverage', default='meta-only', choices=['normal-only', 'full', 'meta-only'], type=str)
+    parser.add_argument('--enforce-specificity-on-metatrain', action='store_true')
+    parser.add_argument('--use-vae', action='store_true')
 
     args = parser.parse_args()
 

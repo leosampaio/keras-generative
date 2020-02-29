@@ -124,6 +124,22 @@ class ConditionalDataset(Dataset):
         self.images, self.attrs = x, y
         self.validation_set = (xv, yv)
 
+    def get_batch_from_validation_set(self, n=32):
+        xv, yv = self.validation_set
+        if len(yv) == 2:
+            y_categorical = np.argmax(yv, axis=1)
+            _, x_data, _, y_data = sk.model_selection.train_test_split(xv,
+                                                                       y_categorical,
+                                                                       stratify=y_categorical,
+                                                                       test_size=n,
+                                                                       random_state=14)
+        else:
+            np.random.seed(14)
+            perm = np.random.permutation(len(xv))
+            np.random.seed()
+            x_data, y_data = xv[perm[:n]], yv[perm[:n]]
+        return x_data, y_data
+
     def generator(self, batchsize, use_set='train'):
         if use_set == 'train':
             x, y = self.images, self.attrs
@@ -162,6 +178,9 @@ class MultiDomainDataset(Dataset):
 
     def get_random_fixed_batch(self, n=32):
         return [ds.get_random_fixed_batch(n) for ds in self.datasets]
+
+    def get_batch_from_validation_set(self, n=32):
+        return [ds.get_batch_from_validation_set(n) for ds in self.datasets]
 
     def generator(self, batchsize):
         generators_list = [ds.generator(batchsize, use_set='train') for ds in self.datasets]
@@ -609,7 +628,7 @@ def load_dataset(dataset_name, make_validation_set=False):
         dataset = ConditionalDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'stacked-mnist':
         x, y, x_test, y_test, attr_names = mnist.load_data()
-        dataset = StackedDataset(name=dataset_name.replace('-', ''))
+        dataset = StackedDataset(name=dataset_name.replace('-', ''), x=x, y=y, attr_names=attr_names, x_test=x_test, y_test=y_test, make_validation_set=make_validation_set)
     elif dataset_name == 'mnist-original':
 
         x, y, x_test, y_test, attr_names = mnist.load_data(original=True)

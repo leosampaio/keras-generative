@@ -82,10 +82,14 @@ class dense(object):
         self.lnorm = lnorm
         self.activation = activation
         self.dropout = dropout
+        self.alt_calls = {}
 
-    def fun(self, inputs):
+    def fun(self, inputs, call_type='normal'):
 
-        x = self.layer(inputs)
+        if call_type == 'normal':
+            x = self.layer(inputs)
+        else:
+            x = self.alt_calls[call_type](inputs)
 
         if self.residual is not None:
             x = keras.layers.Add()([x, self.residual])
@@ -112,6 +116,13 @@ class dense(object):
 
     def add_to_bias(self, additive):
         self.layer.bias = self.layer.bias + additive
+
+    def create_new_call_with_added_values(self, k_add, b_add, call_id):
+        def alt_call(x):
+            outs = K.dot(x, self.layer.kernel + k_add)
+            outs = K.bias_add(outs, self.layer.bias + b_add, data_format='channels_last')
+            return outs
+        self.alt_calls[call_id] = Lambda(alt_call)
 
     def get_gradients(self, loss):
         return K.gradients(loss, self.layer.kernel)[0], K.gradients(loss, self.layer.bias)[0]
@@ -151,10 +162,15 @@ class conv2d(object):
         self.lnorm = lnorm
         self.activation = activation
         self.dropout = dropout
+        self.leaky_relu_slope = leaky_relu_slope
+        self.alt_calls = {}
 
-    def fun(self, inputs):
+    def fun(self, inputs, call_type='normal'):
 
-        x = self.layer(inputs)
+        if call_type == 'normal':
+            x = self.layer(inputs)
+        else:
+            x = self.alt_calls[call_type](inputs)
 
         if self.residual is not None:
             x = keras.layers.Add()([x, self.residual])
@@ -181,6 +197,21 @@ class conv2d(object):
 
     def add_to_bias(self, additive):
         self.layer.bias = self.layer.bias + additive
+
+    def create_new_call_with_added_values(self, k_add, b_add, call_id):
+        def alt_call(x):
+            outs = K.conv2d(
+                x, self.kernel + k_add,
+                strides=self.strides,
+                padding=self.padding,
+                data_format=self.data_format,
+                dilation_rate=self.dilation_rate)
+            outs = K.bias_add(
+                outs,
+                self.bias + b_add,
+                data_format=self.data_format)
+            return outs
+        self.alt_calls[call_id] = Lambda(alt_call)
 
     def get_gradients(self, loss):
         return K.gradients(loss, self.layer.kernel)[0], K.gradients(loss, self.layer.bias)[0]
@@ -533,6 +564,15 @@ class MaximumMeanDiscrepancy(Layer):
 
     def compute_mask(self, inputs, mask=None):
         return [None, None]
+
+
+def reparametrization_layer(embedding_size):
+    def reparametrization(inputs):
+        mu_and_sigma, vae_z = inputs
+        mu = mu_and_sigma[:, :embedding_size]
+        sigma = mu_and_sigma[:, embedding_size:]
+        return sigma * vae_z + mu
+    return Lambda(reparametrization)
 
 
 # legacy

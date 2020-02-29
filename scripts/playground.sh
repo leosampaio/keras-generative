@@ -1,39 +1,69 @@
-EXP_ID=111
-python train.py --model ganomaly-small --dataset mnist-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+# TOPGAN Experiments
 
-EXP_ID=112
-python train.py --model ganomaly-small --dataset svhn-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+# 3e_r(1-5)
 
-EXP_ID=113
-python train.py --model ganomaly-small --dataset cifar10-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+python train.py --model improved-wgan-mlp-synth-veegan --dataset synthetic-8ring --batchsize 128 --embedding-dim 128 --checkpoint-every 249. --epoch 500 --metrics synthetic-data-vis mode-coverage high-quality-ratio --notify-every 1. --send-every 20 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_3e_r
 
-EXP_ID=114
-python train.py --model ganomaly-dcgan --dataset mnist-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+# 3f_r(1-5)
 
-EXP_ID=115
-python train.py --model ganomaly-dcgan --dataset svhn-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+python train.py --model improved-wgan-mlp-synth-veegan --dataset synthetic-25grid --batchsize 128 --embedding-dim 128 --checkpoint-every 249. --epoch 500 --metrics synthetic-data-vis mode-coverage high-quality-ratio --notify-every 1. --send-every 20 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_3f_r
 
-wait
+# 3g_r(1-5)
 
-EXP_ID=116
-python train.py --model ganomaly-dcgan --dataset cifar10-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+python train.py --model began-mlp-synth-veegan --dataset synthetic-8ring --batchsize 128 --embedding-dim 2 --checkpoint-every 249. --epoch 500 --metrics synthetic-data-vis mode-coverage high-quality-ratio --notify-every 1. --send-every 20 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_3g_r
 
-EXP_ID=117
-python train.py --model ganomaly-began --dataset mnist-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+# 3h_r(1-5)
 
-EXP_ID=118
-python train.py --model ganomaly-began --dataset svhn-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+python train.py --model began-mlp-synth-veegan --dataset synthetic-25grid --batchsize 128 --embedding-dim 2 --checkpoint-every 249. --epoch 500 --metrics synthetic-data-vis mode-coverage high-quality-ratio --notify-every 1. --send-every 20 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_3h_r
 
-EXP_ID=119
-python train.py --model ganomaly-began --dataset cifar10-anomaly --batchsize 32 --z-dims 100 --checkpoint-every 100. --epoch 400 --embedding-dim 100 --metrics svm_anomaly tsne pca reconstruction samples --notify-every 5. --lr 1e-4 -r tcomp_$EXP_ID  &
-sleep 30
+# 4(a-h)_r(1-5)
+# 4a (5)
 
-wait
+python train.py --model topgan-ae-dcgan --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples reconstruction --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_4a_r
+
+# 4b (5)
+
+python train.py --model topgan-ae-small2 --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples reconstruction --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_4b_r
+
+# 4c (5)
+
+python train.py --model improved-wgan-dcgan --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_4c_r
+
+# 4d (5)
+
+python train.py --model improved-wgan-small2 --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_4d_r
+
+# 4e (5)
+
+python train.py --model began-dcgan --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples reconstruction --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_4e_r
+
+# 4f (5)
+
+python train.py --model began-small2 --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples reconstruction --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.0 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_4f_r
+
+# 4g (5)
+
+python train.py --model topgan-ae-dcgan --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:1:skip:1 g_triplet:1 d_triplet:1 g_loss:0 d_loss:0 --metrics samples reconstruction --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.00 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments --use-gradnorm --gradnorm-alpha 0. -r cvpr_4g_r
+
+# 4h (1)
+
+python train.py --model topgan-ae-small2 --dataset cifar10 --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 500 --controlled-losses ae_loss:1:skip:1 g_triplet:1 d_triplet:1 g_loss:0 d_loss:0 --metrics samples reconstruction --notify-every 5. --send-every 5 --z-dims 100 --input-noise 0.00 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments --use-gradnorm --gradnorm-alpha 0. -r cvpr_4h_r
+
+# 5(a-h)_r(1-5)
+
+# 5a
+python train.py --model topgan-ae-dcgan --dataset stacked-mnist --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 501 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples mode-count-estimator clas-kl-divergence --notify-every 10. --send-every 2 --z-dims 100 --input-noise 0.00 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_5a_r
+
+# 5b
+
+python train.py --model improved-wgan-dcgan --dataset stacked-mnist --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 501 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples mode-count-estimator clas-kl-divergence --notify-every 10. --send-every 2 --z-dims 100 --input-noise 0.00 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_5b_r
+
+# 5c
+
+python train.py --model began-dcgan --dataset stacked-mnist --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 501 --controlled-losses ae_loss:0 g_triplet:0 d_triplet:0 g_loss:1 d_loss:1 --metrics samples mode-count-estimator clas-kl-divergence --notify-every 10. --send-every 2 --z-dims 100 --input-noise 0.00 --triplet-margin 1 --lr 1e-4 --slack-channel cvpr-experiments -r cvpr_5c_r
+
+# 5d
+
+python train.py --model topgan-ae-dcgan --dataset stacked-mnist --batchsize 128 --embedding-dim 512 --checkpoint-every 99. --epoch 501 --controlled-losses ae_loss:1:skip:1 g_triplet:1 d_triplet:1 g_loss:0 d_loss:0 --metrics histogram-normality samples reconstruction mode-count-estimator clas-kl-divergence --notify-every 10. --send-every 2 --z-dims 100 --input-noise 0.00 --triplet-margin 1 --lr 1e-4 --use-gradnorm --gradnorm-alpha 0. --slack-channel cvpr-experiments -r cvpr_5d_r
+
+
